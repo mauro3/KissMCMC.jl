@@ -200,7 +200,7 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
     for n = (1-nburnin):(niter-nburnin)
         for i=1:2
             nws = nchains12[i] # chains to update
-            nwso = nchains12[rem1(i+1,2)] # other chains, to stretch-move with
+            nwso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
             @sync @parallel for nw in nws
                 # draw a random other chain
                 nwo = rand(nwso)
@@ -244,12 +244,13 @@ end
 
 
 function stretch_move!(theta1, theta0s, nw, nwo, z, ::IsVector)
+    N = size(theta0s,1) # number of parameters
     for j=1:N
         theta1[j] = theta0s[j,nwo] + z*(theta0s[j,nw]-theta0s[j,nwo]) # eq. 7
     end
     return theta1
 end
-function stretch_move!(theta1, theta0s, nw, nwo, z, ::IsScalar)
+function stretch_move!(theta1, theta0s, nw, nw6o, z, ::IsScalar)
     return theta0s[1,nwo][1] + z*(theta0s[1,nw][1]-theta0s[1,nwo][1]) # eq. 7
 end
 # ## MCMC samplers
