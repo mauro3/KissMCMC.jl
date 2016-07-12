@@ -39,7 +39,7 @@ builtin = 1
 pdf = 1
 
 # number of samples to draw
-@everywhere n = Int(5*10^5)
+@everywhere n = Int(10^5)
 @everywhere nchains = 50
 
 # tests
@@ -232,10 +232,14 @@ for dimensions=1:2
             test_mean_std(sa2, thetasp, diff)
 
             print("emceep          : ")
-            emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
-            @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
-            thetas_ep, accept_ratio_ep = emcee_squash(thetas_ep, accept_ratio_ep );
-            test_mean_std(sa2, thetas_ep, diff)
+            if VERSION<v"0.5-"
+                println("skipping because of segfaults.")
+            else
+                emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
+                @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
+                thetas_ep, accept_ratio_ep = emcee_squash(thetas_ep, accept_ratio_ep );
+                test_mean_std(sa2, thetas_ep, diff)
+            end
         end
     end
 end
