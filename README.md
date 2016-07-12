@@ -45,6 +45,12 @@ Other serial samplers:
 - inverse transform sampler `inverse_transform_sample`
 - rejection sampler `rejection_sample_unif` & `rejection_sample`
 
+# TODO
+
+- test and improve parallel samplers
+- refactor serial and parallel samplers into one?
+- add convergence tests: autocorrelation, autocovariance
+- tests: better ways to test convergence for Rosenbrock pdf
 
 # References
 
