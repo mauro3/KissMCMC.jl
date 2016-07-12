@@ -47,7 +47,7 @@ Other serial samplers:
 
 # TODO
 
-- test and improve parallel samplers
+- improve parallel samplers
 - refactor serial and parallel samplers into one?
 - add convergence tests: autocorrelation, autocovariance
 - tests: better ways to test convergence for Rosenbrock pdf
