@@ -205,36 +205,36 @@ for dimensions=1:2
 
         println("\n\nTwo dimensional parallel tests:\n")
         # note that these are slower than the serial one.  But for expensive logpdf they maybe faster.
-        for test in tests2
-            builtin, builtin_n, logpdf, bins, name, diff = test
-            println("\nTesting $name distribution:")
+        if VERSION<v"0.5-"
+            println("skipping because of segfaults.")
+        else
+            for test in tests2
+                builtin, builtin_n, logpdf, bins, name, diff = test
+                println("\nTesting $name distribution:")
 
-            if logpdf==npdf2
-                print("Built-in sampler: ")
-                builtin_n(1)
-                @time sa2 = builtin_n(n)
-            else
-                sa2 = thetas_rosen
-            end
+                if logpdf==npdf2
+                    print("Built-in sampler: ")
+                    builtin_n(1)
+                    @time sa2 = builtin_n(n)
+                else
+                    sa2 = thetas_rosen
+                end
 
-            ## MCMC parallel
-            n_workers = max(length(procs())-1,1)
-            println("Parallel MCMC; number of workers: $n_workers")
+                ## MCMC parallel
+                n_workers = max(length(procs())-1,1)
+                println("Parallel MCMC; number of workers: $n_workers")
 
-            # make one chain per worker
-            a = n_workers>1 ? linspace(0.1,0.9, n_workers):nothing
-            theta0 = n_workers==1 ?  Vector{Float64}[[0.5, 0.5]] : [[0.5,a[i]] for i=1:n_workers]
+                # make one chain per worker
+                a = n_workers>1 ? linspace(0.1,0.9, n_workers):nothing
+                theta0 = n_workers==1 ?  Vector{Float64}[[0.5, 0.5]] : [[0.5,a[i]] for i=1:n_workers]
 
-            print("Metropolisp    : ")
-            metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
-            @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
-            thetasp, accept_ratiop = emcee_squash(thetasp, accept_ratiop );
-            test_mean_std(sa2, thetasp, diff)
+                print("Metropolisp    : ")
+                metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
+                @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
+                thetasp, accept_ratiop = emcee_squash(thetasp, accept_ratiop );
+                test_mean_std(sa2, thetasp, diff)
 
-            print("emceep          : ")
-            if VERSION<v"0.5-"
-                println("skipping because of segfaults.")
-            else
+                print("emceep          : ")
                 emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
                 @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
                 thetas_ep, accept_ratio_ep = emcee_squash(thetas_ep, accept_ratio_ep );
