@@ -31,6 +31,9 @@ histogram(thetas, normalize=true, fillalpha=0.4)
 histogram!(thetase, normalize=true, fillalpha=0.1)
 plot!(0:0.01:5, map(x->exp(logpdf(x)[1]), 0:0.01:5), lw=3)
 ```
+outputs:
+
+![](https://cloud.githubusercontent.com/assets/4098145/16770344/dcb4a47a-484c-11e6-8f6e-0c2d223e9443.png)
 
 MCMC samplers:
 
