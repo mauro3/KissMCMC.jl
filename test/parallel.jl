@@ -1,3 +1,24 @@
+            ## MCMC parallel
+        n_workers = max(length(procs())-1,1)
+        println("Parallel MCMC; number of workers: $n_workers")
+
+        # make one chain per worker
+        theta0 = n_workers==1 ? [0.1] : linspace(0.1,0.9, n_workers)
+
+        print("Metropolisp    : ")
+        metropolisp(pdfblob, sample_prop_normal, theta0, niter=10, logpdf=true)
+        @time thetasp, blobsp, accept_ratiop = metropolisp(pdfblob, sample_prop_normal, theta0, niter=n÷n_workers)
+        thetasp, blobsp, accept_ratiop = emcee_squash(thetasp, blobsp, accept_ratiop );
+        test_mean_std(sa, thetasp)
+
+        print("emceep          : ")
+        emceep(pdfblob, (0.5, 0.1), niter=10, nchains=10);
+        @time thetas_ep, blobs_ep, accept_ratio_ep = emceep(pdfblob, (0.5, 0.1), niter=n÷nchains, nchains=nchains);
+        thetas_ep, blobs_ep, accept_ratio_ep = emcee_squash(thetas_ep, blobs_ep, accept_ratio_ep );
+        test_mean_std(sa, thetas_ep)
+
+
+
 # Test the samplers against known distributions.
 using Compat
 using Base.Test
