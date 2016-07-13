@@ -142,7 +142,7 @@ Output:
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 
-Note: use `emcee_squash` to concatenate all chains into one chain.
+Note: use `squash_chains` to concatenate all chains into one chain.
 
 Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 """
@@ -570,7 +570,7 @@ end
 # - blobs: anything else that the pdf-function returns as second argument
 # - accept_ratio: ratio accepted to total steps
 
-# Note: use `emcee_squash` to concatenate all chains into one chain.
+# Note: use `squash_chains` to concatenate all chains into one chain.
 
 # Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 # """
@@ -702,7 +702,7 @@ end
 
 
 # "Puts all samples into one vector"
-# function emcee_squash(thetas, blobs, accept_ratio)
+# function squash_chains(thetas, blobs, accept_ratio)
 #     if ndims(thetas)==3
 #         return thetas[:,:], blobs==nothing ? nothing : blobs[:,:], mean(accept_ratio)
 #     else

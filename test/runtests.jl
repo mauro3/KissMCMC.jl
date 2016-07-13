@@ -103,7 +103,7 @@ for dimensions=1:2
             emcee(logpdf, (0.5, 0.1), niter=10, nchains=10);
             print("emcee           : ")
             @time thetas_e, accept_ratio_e = emcee(logpdf, (0.5, 0.1), niter=n÷100, nchains=100);
-            thetas_e, accept_ratio_e = emcee_squash(thetas_e, accept_ratio_e );
+            thetas_e, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
             test_mean_std(sa, thetas_e)
         end
 
@@ -153,7 +153,7 @@ for dimensions=1:2
         print("Calculating Rosenbrock standard...")
         emcee(rosenpdf, ([0.5,0.5], 0.1), niter=10, nchains=10);
         thetas_e, accept_ratio_e = emcee(rosenpdf, ([1.0,1.0], 0.1), niter=n÷10, nchains=100);
-        thetas_rosen, accept_ratio_e = emcee_squash(thetas_e, accept_ratio_e );
+        thetas_rosen, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
         thetas_rosen = thetas_rosen[:,1:1000:end]
         println("done.")
 
@@ -199,7 +199,7 @@ for dimensions=1:2
             emcee(logpdf, ([0.5,0.5], 0.1), niter=10, nchains=10);
             print("emcee           : ")
             @time thetas_e, accept_ratio_e = emcee(logpdf, ([0.5,0.5], 0.1), niter=n÷100, nchains=100);
-            thetas_e, accept_ratio_e = emcee_squash(thetas_e, accept_ratio_e );
+            thetas_e, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
             test_mean_std(sa2, thetas_e, diff)
         end
 
@@ -231,13 +231,13 @@ for dimensions=1:2
                 print("Metropolisp    : ")
                 metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
                 @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
-                thetasp, accept_ratiop = emcee_squash(thetasp, accept_ratiop );
+                thetasp, accept_ratiop = squash_chains(thetasp, accept_ratiop );
                 test_mean_std(sa2, thetasp, diff)
 
                 print("emceep          : ")
                 emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
                 @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
-                thetas_ep, accept_ratio_ep = emcee_squash(thetas_ep, accept_ratio_ep );
+                thetas_ep, accept_ratio_ep = squash_chains(thetas_ep, accept_ratio_ep );
                 test_mean_std(sa2, thetas_ep, diff)
             end
         end
