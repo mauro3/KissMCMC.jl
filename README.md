@@ -1,6 +1,7 @@
 # KissMCMC
 
 [![Build Status](https://travis-ci.org/mauro3/KissMCMC.jl.svg?branch=master)](https://travis-ci.org/mauro3/KissMCMC.jl)
+[![Build Status](https://ci.appveyor.com/api/projects/status/github/mauro3/KissMCMC.jl?branch=master&svg=true)](https://ci.appveyor.com/project/mauro3/kissmcmc-jl/branch/master)
 
 **NOTE: this does not work yet...**
 
