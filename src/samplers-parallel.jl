@@ -9,7 +9,7 @@
 ## The parallel MCMC samplers
 ###########################
 
-getlocalindex(rng, nw) = findfirst(rng,nw)
+getlocalindex(rng, nc) = findfirst(rng,nc)
 
 """
 Parallel Metropolis sampler, the simplest MCMC. Can only be used with symmetric
@@ -71,24 +71,24 @@ end
 function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
                        naccept, ni)
     N = length(theta0s[1])
-    @sync @parallel for nw=1:nchains
+    @sync @parallel for nc=1:nchains
         @inbounds for n=(1-nburnin):(niter-nburnin)
             # take a step:
-            theta1 = sample_ppdf(theta0s[nw])
+            theta1 = sample_ppdf(theta0s[nc])
             p1, blob1 = pdf(theta1)
             # if p1/p0>rand() then accept:
-            if  delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
-                theta0s[nw] = theta1
-                blob0s[nw] = blob1
-                p0s[nw] = p1
+            if  delog(ratio(p1,p0s[nc], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
+                theta0s[nc] = theta1
+                blob0s[nc] = blob1
+                p0s[nc] = p1
                 if n>0
-                    naccept[nw] += 1
+                    naccept[nc] += 1
                 end
             end
             if n>0 && rem(n,nthin)==0
-                _setindex!(thetas, theta0s[nw], nw, ni[nw])
-                _setindex!(blobs, blob0s[nw], nw, ni[nw])
-                ni[nw] +=1
+                _setindex!(thetas, theta0s[nc], nc, ni[nc])
+                _setindex!(blobs, blob0s[nc], nc, ni[nc])
+                ni[nc] +=1
             end
         end
     end
@@ -199,41 +199,41 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
     #     @inbounds
     for n = (1-nburnin):(niter-nburnin)
         for i=1:2
-            nws = nchains12[i] # chains to update
-            nwso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
-            @sync @parallel for nw in nws
+            ncs = nchains12[i] # chains to update
+            ncso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
+            @sync @parallel for nc in ncs
                 # draw a random other chain
-                nwo = rand(nwso)
+                nco = rand(ncso)
                 # sample g (eq. 10)
                 z = sample_g(a_scale)
 
                 # propose new step with stretch-move:
-                theta1 = stretch_move!(theta1, theta0s, nw, nwo, z, isscalar)
+                theta1 = stretch_move!(theta1, theta0s, nc, nco, z, isscalar)
 
                 # and its density:
                 p1, blob1 = pdf(theta1)
 
                 # if z^(N-1)*p1/p0>rand() then accept:
                 # (ugly because of log & non-log pdfs)
-                if z^(N-1)*delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand()
-                    theta0s[:,nw] = theta1
-                    p0s[nw] = p1
-                    blob0s[:,nw] = blob1
+                if z^(N-1)*delog(ratio(p1,p0s[nc], pdftype), pdftype)>rand()
+                    theta0s[:,nc] = theta1
+                    p0s[nc] = p1
+                    blob0s[:,nc] = blob1
                     if n>0
-                        naccept[nw] += 1
+                        naccept[nc] += 1
                     end
                 end
                 if  n>0 && rem(n,nthin)==0
                     if isscalar==IsScalar()
-                        _setindex!(thetas, theta0s[:,nw][1], nw, ni[nw])
-                        _setindex!(blobs, blob0s[:,nw][1], nw, ni[nw])
+                        _setindex!(thetas, theta0s[:,nc][1], nc, ni[nc])
+                        _setindex!(blobs, blob0s[:,nc][1], nc, ni[nc])
                     else
-                        _setindex!(thetas, theta0s[:,nw], nw, ni[nw])
-                        _setindex!(blobs, blob0s[:,nw], nw, ni[nw])
+                        _setindex!(thetas, theta0s[:,nc], nc, ni[nc])
+                        _setindex!(blobs, blob0s[:,nc], nc, ni[nc])
                     end
-                    ni[nw] +=1
+                    ni[nc] +=1
                 end
-             end # for nw in nws
+             end # for nc in ncs
         end # for i=1:2
     end # for n=(1-nburnin):(niter-nburnin)
 
@@ -243,15 +243,15 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
 end
 
 
-function stretch_move!(theta1, theta0s, nw, nwo, z, ::IsVector)
+function stretch_move!(theta1, theta0s, nc, nco, z, ::IsVector)
     N = size(theta0s,1) # number of parameters
     for j=1:N
-        theta1[j] = theta0s[j,nwo] + z*(theta0s[j,nw]-theta0s[j,nwo]) # eq. 7
+        theta1[j] = theta0s[j,nco] + z*(theta0s[j,nc]-theta0s[j,nco]) # eq. 7
     end
     return theta1
 end
-function stretch_move!(theta1, theta0s, nw, nw6o, z, ::IsScalar)
-    return theta0s[1,nwo][1] + z*(theta0s[1,nw][1]-theta0s[1,nwo][1]) # eq. 7
+function stretch_move!(theta1, theta0s, nc, nco, z, ::IsScalar)
+    return theta0s[1,nco][1] + z*(theta0s[1,nc][1]-theta0s[1,nco][1]) # eq. 7
 end
 # ## MCMC samplers
 # ################
@@ -311,8 +311,8 @@ end
 # _setindex!(samples::SharedMatrix, theta, n) = samples[:,n]=theta
 # _setindex!(samples, theta, n) = samples[n]=copy(theta)
 # #
-# _setindex!{T}(samples::AbstractArray{T,3}, theta, nw, i) = samples[:,nw,i]=theta
-# _setindex!{T}(samples::AbstractArray{T,2}, theta, nw, i) = samples[nw, i]=copy(theta)
+# _setindex!{T}(samples::AbstractArray{T,3}, theta, nc, i) = samples[:,nc,i]=theta
+# _setindex!{T}(samples::AbstractArray{T,2}, theta, nc, i) = samples[nc, i]=copy(theta)
 
 
 # ## The parallel samplers
@@ -372,24 +372,24 @@ end
 #     ni = SharedArray(Int, nchains, init = S->S[:]=1)
 #     N = length(theta0s[1])
 
-#     @sync @parallel for nw=1:nchains
+#     @sync @parallel for nc=1:nchains
 #         @inbounds for n=(1-nburnin):(niter-nburnin)
 #             # take a step:
-#             theta1 = sample_ppdf(theta0s[nw])
+#             theta1 = sample_ppdf(theta0s[nc])
 #             p1, blob1 = pdf(theta1)
 #             # if p1/p0>rand() then accept:
-#             if  delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
-#                 theta0s[nw] = theta1
-#                 blob0s[nw] = blob1
-#                 p0s[nw] = p1
+#             if  delog(ratio(p1,p0s[nc], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
+#                 theta0s[nc] = theta1
+#                 blob0s[nc] = blob1
+#                 p0s[nc] = p1
 #                 if n>0
-#                     naccept[nw] += 1
+#                     naccept[nc] += 1
 #                 end
 #             end
 #             if n>0 && rem(n,nthin)==0
-#                 _setindex!(thetas, theta0s[nw], nw, ni[nw])
-#                 _setindex!(blobs, blob0s[nw], nw, ni[nw])
-#                 ni[nw] +=1
+#                 _setindex!(thetas, theta0s[nc], nc, ni[nc])
+#                 _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                 ni[nc] +=1
 #             end
 #         end
 #     end
@@ -480,14 +480,14 @@ end
 #         end
 #         # Check that IC has nonzero pdf, otherwise drop it:
 #         chains2drop = Int[]
-#         for nw =1:nchains
-#             p0, blob0 = pdf(theta0s[nw])
+#         for nc =1:nchains
+#             p0, blob0 = pdf(theta0s[nc])
 #             if comp2zero(p0,pdftype) #p0==0
-#                 warning("""Initial parameters of chain #$nw have zero probability density.
+#                 warning("""Initial parameters of chain #$nc have zero probability density.
 #                             Skipping this chain.
-#                             theta0=$(theta0s[nw])
+#                             theta0=$(theta0s[nc])
 #                             """)
-#                 push!(chains2drop, nw)
+#                 push!(chains2drop, nc)
 #             else
 #                 # initialize p0s and blob0s
 #                 push!(p0s, p0)
@@ -595,34 +595,34 @@ end
 
 #     #@inbounds
 #     for n = (1-nburnin):(niter-nburnin)
-#         for nw = 1:nchains
+#         for nc = 1:nchains
 #             # draw a random other chain
 #             no = rand(1:nchains-1)
-#             no = no>=nw ? no+1 : no # shift by one
+#             no = no>=nc ? no+1 : no # shift by one
 #             # sample g (eq. 10)
 #             z = sample_g(a_scale)
 
 #             # propose new step:
-#             theta1 = theta0s[no] + z*(theta0s[nw]-theta0s[no]) # eq. 7
+#             theta1 = theta0s[no] + z*(theta0s[nc]-theta0s[no]) # eq. 7
 #             # and its pdf:
 #             p1, blob1 = pdf(theta1)
 
 #             # if z^(N-1)*p1/p0>rand() then accept:
-#             if z^(N-1)*delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
-#                 theta0s[nw] = theta1
-#                 p0s[nw] = p1
+#             if z^(N-1)*delog(ratio(p1,p0s[nc], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
+#                 theta0s[nc] = theta1
+#                 p0s[nc] = p1
 
-#                 blob0s[nw] = blob1
+#                 blob0s[nc] = blob1
 #                 if n>0
-#                     naccept[nw] += 1
+#                     naccept[nc] += 1
 #                 end
 #             end
 #             if  n>0 && rem(n,nthin)==0
-#                 _setindex!(thetas, theta0s[nw], nw, ni[nw])
-#                 _setindex!(blobs, blob0s[nw], nw, ni[nw])
-#                 ni[nw] +=1
+#                 _setindex!(thetas, theta0s[nc], nc, ni[nc])
+#                 _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                 ni[nc] +=1
 #             end
-#         end # for nw =1:nchains
+#         end # for nc =1:nchains
 #     end # for n=(1-nburnin):(niter-nburnin)
 
 #     accept_ratio = [na/(niter-nburnin) for na in naccept]
@@ -663,35 +663,35 @@ end
 # #     @inbounds
 #     for n = (1-nburnin):(niter-nburnin)
 #         for i=1:2
-#             nws = nchains12[i] # chains to update
-#             nwso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
-#             @sync @parallel for nw in nws
+#             ncs = nchains12[i] # chains to update
+#             ncso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
+#             @sync @parallel for nc in ncs
 #                 # draw a random other chain
-#                 nwo = rand(nwso)
+#                 nco = rand(ncso)
 #                 # sample g (eq. 10)
 #                 z = sample_g(a_scale)
 
 #                 # propose new step with stretch-move:
-#                 theta1 = theta0s[nwo] + z*(theta0s[nw]-theta0s[nwo]) # eq. 7
+#                 theta1 = theta0s[nco] + z*(theta0s[nc]-theta0s[nco]) # eq. 7
 #                 # and its density:
 #                 p1, blob1 = pdf(theta1)
 
 #                 # if z^(N-1)*p1/p0>rand() then accept:
 #                 # (ugly because of log & non-log pdfs)
-#                 if z^(N-1)*delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand()
-#                     theta0s[nw] = theta1
-#                     p0s[nw] = p1
-#                     blob0s[nw] = blob1
+#                 if z^(N-1)*delog(ratio(p1,p0s[nc], pdftype), pdftype)>rand()
+#                     theta0s[nc] = theta1
+#                     p0s[nc] = p1
+#                     blob0s[nc] = blob1
 #                     if n>0
-#                         naccept[nw] += 1
+#                         naccept[nc] += 1
 #                     end
 #                 end
 #                 if  n>0 && rem(n,nthin)==0
-#                     _setindex!(thetas, theta0s[nw], nw, ni[nw])
-#                     _setindex!(blobs, blob0s[nw], nw, ni[nw])
-#                     ni[nw] +=1
+#                     _setindex!(thetas, theta0s[nc], nc, ni[nc])
+#                     _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                     ni[nc] +=1
 #                 end
-#             end # for nw in nws
+#             end # for nc in ncs
 #         end # for i=1:2
 #     end # for n=(1-nburnin):(niter-nburnin)
 

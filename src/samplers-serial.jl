@@ -143,8 +143,8 @@ _setindex!(::Void, args...) = nothing
 _setindex!(samples::AbstractMatrix, theta, n) = samples[:,n]=theta
 _setindex!(samples, theta, n) = samples[n]=copy(theta)
 #
-_setindex!{T}(samples::AbstractArray{T,3}, theta, nw, i) = samples[:,nw,i]=theta
-_setindex!{T}(samples::AbstractArray{T,2}, theta, nw, i) = samples[nw, i]=copy(theta)
+_setindex!{T}(samples::AbstractArray{T,3}, theta, nc, i) = samples[:,nc,i]=theta
+_setindex!{T}(samples::AbstractArray{T,2}, theta, nc, i) = samples[nc, i]=copy(theta)
 
 
 """
@@ -230,14 +230,14 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
         end
         # Check that IC has nonzero pdf, otherwise drop it:
         chains2drop = Int[]
-        for nw =1:nchains
-            p0, blob0 = pdf(theta0s[nw])
+        for nc =1:nchains
+            p0, blob0 = pdf(theta0s[nc])
             if comp2zero(p0,pdftype) #p0==0
-                warning("""Initial parameters of chain #$nw have zero probability density.
+                warning("""Initial parameters of chain #$nc have zero probability density.
                         Skipping this chain.
-                        theta0=$(theta0s[nw])
+                        theta0=$(theta0s[nc])
                         """)
-                push!(chains2drop, nw)
+                push!(chains2drop, nc)
             else
                 # initialize p0s and blob0s
                 push!(p0s, p0)
@@ -363,7 +363,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
             ni +=1
         end
     end
-    accept_ratio = naccept/length(thetas)
+    accept_ratio = naccept/(niter-nburnin)
     return thetas, accept_ratio, blobs
 end
 
@@ -432,6 +432,7 @@ function emcee(pdf, theta0;
     # do the MCMC
     _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter, nburnin, nchains, nthin, pdftype, a_scale)
 end
+const debug = Int[]
 function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
@@ -439,34 +440,38 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
     N = length(theta0s[1])
 
     @inbounds for n = (1-nburnin):(niter-nburnin)
-        for nw = 1:nchains
+        for nc = 1:nchains
             # draw a random other chain
             no = rand(1:nchains-1)
-            no = no>=nw ? no+1 : no # shift by one
+            no = no>=nc ? no+1 : no # shift by one
+            if nc==9
+                push!(debug, no)
+            end
             # sample g (eq. 10)
             z = sample_g(a_scale)
 
-            # propose new step with the stretch move:
-            theta1 = theta0s[no] + z*(theta0s[nw]-theta0s[no]) # eq. 7
-            # and its pdf:
+            # sample a new theta with the stretch move:
+            theta1 = theta0s[no] + z*(theta0s[nc]-theta0s[no]) # eq. 7
+            # and calculate the theta1 density:
             p1, blob1 = pdf(theta1)
 
             # if z^(N-1)*p1/p0>rand() then accept:
-            if z^(N-1)*delog(ratio(p1,p0s[nw], pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
-                theta0s[nw] = theta1
-                p0s[nw] = p1
+            if z^(N-1)*delog(ratio(p1,p0s[nc], pdftype), pdftype)>=rand() # ugly because of log & non-log pdfs
+                theta0s[nc] = theta1
+                p0s[nc] = p1
 
-                blob0s[nw] = blob1
+                blob0s[nc] = blob1
                 if n>0
-                    naccept[nw] += 1
+                    naccept[nc] += 1
                 end
             end
+            # store theta after burn-in
             if  n>0 && rem(n,nthin)==0
-                _setindex!(thetas, theta0s[nw], nw, ni[nw])
-                _setindex!(blobs, blob0s[nw], nw, ni[nw])
-                ni[nw] +=1
+                _setindex!(thetas, theta0s[nc], nc, ni[nc])
+                _setindex!(blobs, blob0s[nc], nc, ni[nc])
+                ni[nc] +=1
             end
-        end # for nw =1:nchains
+        end # for nc =1:nchains
     end # for n=(1-nburnin):(niter-nburnin)
 
     accept_ratio = [na/(niter-nburnin) for na in naccept]
@@ -474,21 +479,36 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
 end
 
 "Puts the samples of all chains into one vector."
-function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing)
+function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false)
+    nchains=length(accept_ratio)
+    chaines2keep = trues(nchains)
+    if drop_low_accept_ratio
+        # this is a bit of a hack, but emcee seems to sometimes have
+        # chains which are stuck in oblivion.  These have a very low
+        # acceptance ratio, thus filter them out.
+        ma,sa = median(accept_ratio), std(accept_ratio)
+        for nc=1:nchains
+            if accept_ratio[nc]<ma-1*sa # this 1 is heuristic
+                println("Dropping low accept-ratio chain $nc")
+                chaines2keep[nc] = false
+            end
+        end
+    end
+    # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
-        return thetas[:,:], mean(accept_ratio), blobs==nothing ? nothing : blobs[:,:]
+        return thetas[:,chaines2keep,:][:,:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,chaines2keep,:][:,:]
     else
-        return thetas[:], mean(accept_ratio), blobs==nothing ? nothing : blobs[:]
+        return thetas[chaines2keep,:][:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[chaines2keep,:][:]
     end
 end
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
-g_pdf(z, a=2.0) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
+g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
 
 """
 Inverse cdf of g-pdf, see eq. 10 of Foreman-Mackey et al. 2013.
 """
-cdf_g_inv(u, a=2.0) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
+cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 
-"Sample from g using inverse transform sampling"
-sample_g(a=2.0) = cdf_g_inv(rand(), a)
+"Sample from g using inverse transform sampling.  a=2.0 is recommended."
+sample_g(a) = cdf_g_inv(rand(), a)
