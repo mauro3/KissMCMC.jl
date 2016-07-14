@@ -194,7 +194,7 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
                           naccept, ni)
     N = size(theta0s,1) # number of parameters
     # the two sets
-    nchains12 = UnitRange{Int64}[1:nchains÷2, nchains÷2+1:nchains]
+    nchains12 = UnitRange{Int}[1:nchains÷2, nchains÷2+1:nchains]
 
     #     @inbounds
     for n = (1-nburnin):(niter-nburnin)
@@ -658,7 +658,7 @@ end
 
 # #    @show nchains, 1:nchains÷2
 #     # the two sets
-#     nchains12 = UnitRange{Int64}[1:nchains÷2, nchains÷2+1:nchains]
+#     nchains12 = UnitRange{Int}[1:nchains÷2, nchains÷2+1:nchains]
 
 # #     @inbounds
 #     for n = (1-nburnin):(niter-nburnin)
