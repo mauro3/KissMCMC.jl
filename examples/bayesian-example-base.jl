@@ -264,7 +264,7 @@ end
 
 function plot_violin(ts_measured, xv_measured, ts_pred, xv_a, xv_b, A, ω, ϕ;
                      sigma_x=0.0, sigma_v=0.0, sigma_t=0.0, t_plot=nothing, pred_inds=nothing,
-                     pred_inds_sep=nothing, ylims=(-4.5,4.5))
+                     pred_inds_sep=nothing, ylims=(-4.5,4.5), size=(600,300))
 
 
     x_measured,v_measured = unpack_xv(xv_measured)
@@ -315,6 +315,6 @@ function plot_violin(ts_measured, xv_measured, ts_pred, xv_a, xv_b, A, ω, ϕ;
         ps = ps[:]
         ne = length(pred_inds_sep)
         widths = vcat(0.6, 0.4/ne*ones(ne))
-        plot(ps...,layout=grid(2,length(ps)÷2, widths=widths))
+        plot(ps...,layout=grid(2,length(ps)÷2, widths=widths), size=size)
     end
 end
