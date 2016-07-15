@@ -1,15 +1,22 @@
-# A simple example doing Bayesian inference for a harmonic oscillator
-# using MCMC and the KissMCMC samplers.
+# Making predictions, aka how to use blobs.
 #
-# The forward model and other bits are defined in
-# bayesian-example-base.jl.
+# As far as I can tell, there are two types of predictions:
+# a) predict true (t,x,v) tuples
+# b) predict measured (t,x,v) tuples
 #
-# This example assumes that the times of measurements are not
-# errror-free and thus are parameters as well.  I assume here that the
-# ts_measured are at the times when the measurements are supposed to
-# be taken (thus at regular intervals in this setup), but that the
-# actual time of measurement was at a different time.
-
+# How to do it:
+# (a) is done by evaluating the forward model at t to get samples of
+#     (x,v)
+# (b) is done by drawing a sample (t,x,v) from the likelihood for a given theta
+#
+# Implementation:
+# (a) can be implemented is to return a blob containing the
+#     (x,v) at the desired ts.
+# (b) is a bit harder.  I think it goes like this: for a given theta,
+#     draw a t_p with error sigma_t, evaluate fwd(theta, t_d)->(x,
+#     v). Draw an x_p, y_p with sigma_x,sigma-v.
+#
+# This modifies bayesian-example-2.jl to make predictions.
 
 # this is where the forward model, probabilistic model etc are defined.
 include("bayesian-example-base.jl")
@@ -19,23 +26,48 @@ if plotyes
 end
 
 # make the synthetic measurements
-sigma_x = 0.3
-sigma_v = 0.2
-sigma_t = 0.1
+fac = 2
+sigma_x = 0.3 *fac
+sigma_v = 0.2 *fac
+sigma_t = 0.1 *fac
 const ts_measured, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_measurements(theta_true = [2.5, 1.1, 3], # [A, ω, ϕ]
-                                                             sigma_x=sigma_x,
-                                                             sigma_v=sigma_v,
-                                                             sigma_t=sigma_t)
+                                                                                        sigma_x=sigma_x,
+                                                                                        sigma_v=sigma_v,
+                                                                                        sigma_t=sigma_t)
 @assert !all(ts_measured.==ts_true)
 
 ## Plot the measurements
-
 # using Plots,StatPlots
 plotyes && plotmeasurements(ts_measured,xv_measured,A,ω,ϕ,sigma_x=sigma_x,sigma_v=sigma_v,sigma_t=sigma_t)
 
 # choose to use the analytic or ODE-forward model
 fwd! = [fwd_ana!, fwd_ode!][1]
+
+################
+# Now predict (x,y) (a) and (b) at these locations
+ts_pred = [5.0, 8.5, 15, 30, 100, 1e4]
+# I do this below by returning a blob of x,v values
+# [x,v,x,v,...]
+
+function unpack_blob(blob::Vector, ts_pred)
+    n = length(ts_pred)
+    xv_a = blob[1:2n]
+    xv_b = blob[2n+1:end]
+    return xv_a,xv_b
+end
+function unpack_blob(blob::Matrix, ts_pred)
+    n = length(ts_pred)
+    ns = size(blob,2)
+    xv_a,xv_b = zeros(2n,ns),zeros(2n,ns)
+    for s=1:ns
+        xv_a[:,s] = blob[1:2n,s]
+        xv_b[:,s] = blob[2n+1:end,s]
+    end
+    return xv_a,xv_b
+end
+
 const fwdout = init_fwd(ts_measured) # Note, this will be modified in place
+const fwdout_pred = init_fwd(ts_pred) # Note, this will be modified in place
 
 ##############################
 # Parameter estimation using the MCMC functions
@@ -73,10 +105,6 @@ end
 function loglikelihood(theta)
     # Closure over fwdout, fwd!, xv_measured, ts_measured
     # make sure those are `const`!
-    A,ω,ϕ,sigma_x,sigma_v,sigma_t = theta
-    ts = getts(theta)
-    fwd!(fwdout, ts, A,ω,ϕ)
-    loglikelihood(fwdout, ts, xv_measured, ts_measured, sigma_x,sigma_v,sigma_t)
 end
 
 # Normal & uniform priors
@@ -117,7 +145,32 @@ logprior = (theta) -> (logprior_A(theta[1]) +
                        logpriors_ts(getts(theta))
                        )
 
-logposterior = @anon theta -> loglikelihood(theta) + logprior(theta)
+function logposterior_blob(theta)
+    # calculate posterior density:
+    A,ω,ϕ,sigma_x,sigma_v,sigma_t = theta
+    ts = getts(theta)
+    fwd!(fwdout, ts, A,ω,ϕ)
+    logl = loglikelihood(fwdout, ts, xv_measured, ts_measured, sigma_x,sigma_v,sigma_t)
+    density = logl + logprior(theta)
+    # Calculate blob.  Note that if the forward model was more
+    # expensive then this should be done more cleverly by only
+    # evaluating it simultaneously at the ts_measured and ts_pred.
+    np = length(ts_pred)
+    blob = zeros(4*np)
+    # (a) prediction
+    fwd!(fwdout_pred, ts_pred, A,ω,ϕ)
+    blob[1:2np] = fwdout_pred
+    # (b) prediction
+    ts_pred_s = randn(np)*sigma_t + ts_pred # t with errors
+    fwd!(fwdout_pred, ts_pred_s, A,ω,ϕ) # fwd-model at those points
+    for i=1:np
+        # sample x and v
+        blob[2np+2i-1] = randn()*sigma_x + fwdout_pred[2i-1]
+        blob[2np+2i  ] = randn()*sigma_v + fwdout_pred[2i]
+    end
+    return density, blob
+end
+
 
 ######
 # MCMC
@@ -144,21 +197,25 @@ theta_true = vcat([A, ω, ϕ, sigma_x, sigma_v, sigma_t], ts_measured);  # good 
 theta0 = vcat([2.1, 1.1, 1.1, 0.2, 0.2, 0.05], ts_measured); # decent IC
 
 @time 1
-metropolis(logposterior, sample_ppdf, theta0, niter=2)
+metropolis(logposterior_blob, sample_ppdf, theta0, niter=2, hasblob=true)
 print("Metropolis: ")
-@time thetas_m, accept_ratio_m = metropolis(logposterior, sample_ppdf, theta0,
-                                            niter=niter, nthin=nthin, nburnin=nburnin)
+@time thetas_m, accept_ratio_m, blobs_m = metropolis(logposterior_blob, sample_ppdf, theta0,
+                                                     niter=niter, nthin=nthin, nburnin=nburnin, hasblob=true)
+xv_a,xv_b = unpack_blob(blobs_m, ts_pred);
+x_a,v_a = unpack_xv(xv_a);
 print_results(thetas_m, accept_ratio_m, names=varnames, title="Metropolis", theta_true=theta_true)
 
-emcee(logposterior, (theta0, 0.1), niter=10, nchains=2)
+emcee(logposterior_blob, (theta0, 0.1), niter=10, nchains=2, hasblob=true)
 print("emcee:")
-@time thetas_ec, accept_ratio_ec = emcee(logposterior, (theta0, 0.1),
-                                         niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e)
+@time thetas_ec, accept_ratio_ec, blobs_ec = emcee(logposterior_blob, (theta0, 0.1),
+                                               niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e, hasblob=true)
 # When running this problem with IC far from the maximum, then emcee produces
-thetas_e, accept_ratio_e = squash_chains(thetas_ec, accept_ratio_ec, drop_low_accept_ratio=true)
+thetas_e, accept_ratio_e, blobs_e = squash_chains(thetas_ec, accept_ratio_ec, blobs_ec, drop_low_accept_ratio=true)
 print_results(thetas_e, accept_ratio_e, names=varnames, title="emcee", theta_true=theta_true)
 
 np = 10
 plotyes && cornerplot(thetas_m[1:np,:]', label=varnames[1:np])
+plotyes && plot_violin(ts_measured, xv_measured, ts_pred, xv_a, xv_b, A, ω, ϕ;
+                            sigma_x=sigma_x, sigma_v=sigma_v, sigma_t=sigma_t, t_plot=0:0.01:15, pred_inds=1:3, pred_inds_sep=4:6)
 
 nothing

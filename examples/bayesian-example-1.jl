@@ -14,7 +14,7 @@ if plotyes
 end
 
 # make the synthetic xv_measured
-sigma = 0.3
+sigma = 0.4
 const ts_measured, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_measurements(theta_true = [2.5, 1.1, 3], # [A, ω, ϕ]
                                                                                sigma_x=sigma,
                                                                                sigma_v=sigma,
@@ -24,7 +24,7 @@ const ts_measured, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_mea
 ## Plot the measurements
 
 # using Plots,StatPlots
-plotyes && plotmeasurements(ts_measured,xv_measured,A,ω,ϕ)
+plotyes && plotmeasurements(ts_measured,xv_measured,A,ω,ϕ,sigma_x=sigma,sigma_v=sigma)
 
 # choose to use the analytic or ODE-forward model
 fwd! = [fwd_ana!, fwd_ode!][1]

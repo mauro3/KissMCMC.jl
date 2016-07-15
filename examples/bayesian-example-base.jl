@@ -215,7 +215,7 @@ Output:
 - ts, xv_measured -- the measured xv_measured: measurement times and values
 - ts_true, xv_true  -- the true values of the system at the true measurement time
 """
-function make_synthetic_measurements(;ts = 0:0.25:10, # time steps at which measurements are taken
+function make_synthetic_measurements(;ts = 0.0:10.0, # time steps at which measurements are taken
                    theta_true = [2.5, 1.1, 3], # [A, ω, ϕ]
                    sigma_x = 0.3, # std deviation of measurement errors of x
                    sigma_v = 0.2, # std deviation of measurement errors of v
@@ -240,21 +240,81 @@ end
 # ##############################
 # # Plotting
 
+unpack_xv(xv::Vector) = (xv[1:2:end], xv[2:2:end])
+unpack_xv(xv::Matrix) = (xv[1:2:end,:], xv[2:2:end,:])
+
 # include("plotting.jl")
 
 # "Plot distirbution of esitmated parameters"
 # plot_result(theta, theta_true) = plot_samples_vs_true(theta, theta_true; names=["ω","x0", "v0"])
 
-"Plots the true solution and the noisy synthetic measurements."
-function plotmeasurements(ts, xv_measured, A, ω, ϕ)
-    x_measured = xv_measured[1:2:end]
-    v_measured = xv_measured[2:2:end]
-    t_plot = ts[1]:0.01:ts[end]
+"Plots the true solution and the noisy synthetic measurements.  Errorbars are two sigma."
+function plotmeasurements(ts_measured, xv_measured, A, ω, ϕ; sigma_x=0.0, sigma_v=0.0, sigma_t=0.0)
+    x_measured,v_measured = unpack_xv(xv_measured)
+    t_plot = ts_measured[1]:0.01:ts_measured[end]
     x_plot,v_plot = asol(t_plot,A,ω,ϕ)
     p1 = plot(t_plot, x_plot, label="x", ylabel="x")
-    scatter!(ts, x_measured, markercolor=:blue,label="x measured")
+    scatter!(ts_measured, x_measured, markercolor=:blue,label="x measured", xerr=2*sigma_t, yerr=2*sigma_x)
     p2 = plot(t_plot, v_plot, label="v", ylabel="v", xlabel="t")
-    scatter!(ts, v_measured, markercolor=:green,label="v measured")
+    scatter!(ts_measured, v_measured, markercolor=:green,label="v measured", xerr=2*sigma_t, yerr=2*sigma_v)
     xlims!((0,10))
     plot(p1,p2,layout=(2,1),link=:x)
+end
+
+
+function plot_violin(ts_measured, xv_measured, ts_pred, xv_a, xv_b, A, ω, ϕ;
+                     sigma_x=0.0, sigma_v=0.0, sigma_t=0.0, t_plot=nothing, pred_inds=nothing,
+                     pred_inds_sep=nothing, ylims=(-4.5,4.5))
+
+
+    x_measured,v_measured = unpack_xv(xv_measured)
+    x_a,v_a = unpack_xv(xv_a)
+    x_b,v_b = unpack_xv(xv_b)
+    if pred_inds==nothing
+        pred_inds = 1:length(ts_pred)
+    end
+    if t_plot==nothing
+        t_plot = min(ts_mebsured[1],ts_pred[1]):0.01:max(ts_pred[end],ts_measured[end])
+    end
+    x_plot,v_plot = asol(t_plot,A,ω,ϕ)
+    p1 = plot(t_plot, x_plot, label="x", ylabel="x")
+    scatter!(ts_measured, x_measured, markercolor=:blue,label="x measured", xerr=2*sigma_t, yerr=2*sigma_x)
+    # violins, see https://github.com/tbreloff/Plots.jl/pull/339
+    violin!(ts_pred[pred_inds], vec(x_a[pred_inds,:]),alpha=0.3, label="prediction (a)")
+    violin!(ts_pred[pred_inds], vec(x_b[pred_inds,:]),alpha=0.3, label="prediction (b)")
+    ylims!(ylims)
+
+    p2 = plot(t_plot, v_plot, label="v", ylabel="v", xlabel="t")
+    scatter!(ts_measured, v_measured, markercolor=:green,label="v measured", xerr=2*sigma_t, yerr=2*sigma_v)
+    violin!(ts_pred[pred_inds], vec(v_a[pred_inds,:]),alpha=0.3, label="prediction (a)")
+    violin!(ts_pred[pred_inds], vec(v_b[pred_inds,:]),alpha=0.3, label="prediction (a)")
+    ylims!(ylims)
+
+    if pred_inds_sep==nothing
+        plot(p1,p2,layout=(2,1))
+    else
+        ps = [p1,p2]
+        for i in pred_inds_sep
+            tp = ts_pred[i]
+            t_plot = tp-.6:0.01:tp+.6
+            x_plot,v_plot = asol(t_plot,A,ω,ϕ)
+            push!(ps, plot(t_plot, x_plot, label="x", ylabel="x"))
+            violin!(ts_pred[i:i], vec(x_a[i,:]),alpha=0.3, label="prediction (a)")
+            violin!(ts_pred[i:i], vec(x_b[i,:]),alpha=0.3, label="prediction (b)",
+                    legend=false)
+            ylims!(ylims)
+
+            push!(ps, plot(t_plot, v_plot, label="v", ylabel="v"))
+            violin!(ts_pred[i:i], vec(v_a[i,:]),alpha=0.3, label="prediction (a)")
+            violin!(ts_pred[i:i], vec(v_b[i,:]),alpha=0.3, label="prediction (b)",
+                    legend=false)
+            ylims!(ylims)
+        end
+        # resorting:
+        ps = reshape(ps,2,length(ps)÷2)'
+        ps = ps[:]
+        ne = length(pred_inds_sep)
+        widths = vcat(0.6, 0.4/ne*ones(ne))
+        plot(ps...,layout=grid(2,length(ps)÷2, widths=widths))
+    end
 end
