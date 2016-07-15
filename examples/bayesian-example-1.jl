@@ -15,20 +15,20 @@ end
 
 # make the synthetic xv_measured
 sigma = 0.3
-const ts, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_measurements(para_true = [2.5, 1.1, 3], # [A, ω, ϕ]
-                                                        sigma_x=sigma,
-                                                        sigma_v=sigma,
-                                                        sigma_t=0)
-@assert all(ts.==ts_true)
+const ts_measured, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_measurements(theta_true = [2.5, 1.1, 3], # [A, ω, ϕ]
+                                                                               sigma_x=sigma,
+                                                                               sigma_v=sigma,
+                                                                               sigma_t=0)
+@assert all(ts_measured.==ts_true)
 
 ## Plot the measurements
 
 # using Plots,StatPlots
-plotyes && plotmeasurements(ts,xv_measured,A,ω,ϕ)
+plotyes && plotmeasurements(ts_measured,xv_measured,A,ω,ϕ)
 
 # choose to use the analytic or ODE-forward model
 fwd! = [fwd_ana!, fwd_ode!][1]
-const fwdout = init_fwd(ts) # Note, this will be modified in place
+const fwdout = init_fwd(ts_measured) # Note, this will be modified in place
 
 ##############################
 # Parameter estimation using the MCMC functions
@@ -36,13 +36,15 @@ const fwdout = init_fwd(ts) # Note, this will be modified in place
 #
 # fitting parameters [A,ω,ϕ,sigma] = theta
 
+varnames = ["A","ω", "ϕ", "σ"]
+
 # Likelilhood
 
 function loglikelihood(theta)
-    # Closure over fwdout, fwd!, xv_measured, ts
+    # Closure over fwdout, fwd!, xv_measured, ts_measured
     # make sure those are `const`!
     A,ω,ϕ,sigma = theta
-    fwd!(fwdout, ts, A,ω,ϕ)
+    fwd!(fwdout, ts_measured, A,ω,ϕ)
     loglikelihood(fwdout, xv_measured, sigma)
 end
 
@@ -54,7 +56,7 @@ logprior_ϕ(ϕ) = 0<=ϕ<2*pi ? 0.0 : -Inf # ϕ is bounded
 
 sigma_est = 0.2 # our prior estimate of sigma
 sigma_est_sigma = 0.2 # our estimate of the std of sigma
-logprior_sigma(sigma) = sigma[1]<=0 ? -Inf : -(sigma[1]-sigma_est)^2/(2*sigma_est_sigma)
+logprior_sigma(sigma) = sigma<=0 ? -Inf : -(sigma-sigma_est)^2/(2*sigma_est_sigma)
 
 logprior = (theta) -> (logprior_A(theta[1]) +
                        logprior_ω(theta[2]) +
@@ -84,7 +86,7 @@ sig = 0.01  # this needs tuning, accept_ratio of 1/4 is good, they say.
 const sigma_ppdf = [sig, sig, sig, sig]
 sample_ppdf(theta) = [randn()*sigma_ppdf[i]+theta[i] for i=1:length(theta)]
 
-theta0 = [A, ω, ϕ, sigma];  # good IC
+theta_true = [A, ω, ϕ, sigma];  # good IC
 theta0 = [2.1, 1.1, 1.1, 0.2]; # decent IC
 # note that the emcee sampler does poorly with a poor IC!
 #theta0 = [1.74,0.001, 0.25, 1.77] # bad IC
@@ -94,7 +96,7 @@ metropolis(logposterior, sample_ppdf, theta0, niter=2)
 print("Metropolis: ")
 @time thetas_m, accept_ratio_m = metropolis(logposterior, sample_ppdf, theta0,
                                             niter=niter, nthin=nthin, nburnin=nburnin)
-print_results("Metropolis", [A,ω,ϕ,sigma], thetas_m, accept_ratio_m)
+print_results(thetas_m, accept_ratio_m, names=varnames, title="Metropolis", theta_true=theta_true)
 
 emcee(logposterior, (theta0, 0.1), niter=10, nchains=2)
 print("emcee:")
@@ -102,7 +104,7 @@ print("emcee:")
                                          niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e)
 # When running this problem with IC far from the maximum, then emcee produces
 thetas_e, accept_ratio_e = squash_chains(thetas_ec, accept_ratio_ec, drop_low_accept_ratio=true)
-print_results("emcee", [A,ω,ϕ,sigma], thetas_e, accept_ratio_e)
+print_results(thetas_e, accept_ratio_e, names=varnames, title="emcee", theta_true=theta_true)
 
 plotyes && cornerplot(thetas_m[1:3,:]', label=["A","ω", "ϕ"])
 

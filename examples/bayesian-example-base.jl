@@ -17,11 +17,6 @@ else
     macro anon(args)
         args
     end
-    # good old hist is depricated:
-    function hist(samples,nbins)
-        h=fit(Histogram, samples,nbins=nbins)
-        (h.edges[1], h.weights)
-    end
 end
 
 # Note that there is a similar example here:
@@ -221,7 +216,7 @@ Output:
 - ts_true, xv_true  -- the true values of the system at the true measurement time
 """
 function make_synthetic_measurements(;ts = 0:0.25:10, # time steps at which measurements are taken
-                   para_true = [2.5, 1.1, 3], # [A, ω, ϕ]
+                   theta_true = [2.5, 1.1, 3], # [A, ω, ϕ]
                    sigma_x = 0.3, # std deviation of measurement errors of x
                    sigma_v = 0.2, # std deviation of measurement errors of v
                    sigma_t = 0.0 # std deviation of time errors
@@ -229,7 +224,7 @@ function make_synthetic_measurements(;ts = 0:0.25:10, # time steps at which meas
     ns = length(ts)
     # add noise to the times:
     ts_true = ts + randn(ns)*sigma_t
-    xv_true = fwd_ana(ts_true, para_true...)
+    xv_true = fwd_ana(ts_true, theta_true...)
     xs = xv_true[1:2:end]
     vs = xv_true[2:2:end]
 
@@ -237,7 +232,7 @@ function make_synthetic_measurements(;ts = 0:0.25:10, # time steps at which meas
     x_measured = xs + sigma_x*randn(ns)
     v_measured = vs + sigma_v*randn(ns)
     xv_measured = hcat(x_measured ,v_measured)'[:]
-    A, ω, ϕ = para_true
+    A, ω, ϕ = theta_true
     return ts, xv_measured, A, ω, ϕ, ts_true, xv_true
 end
 
@@ -262,35 +257,4 @@ function plotmeasurements(ts, xv_measured, A, ω, ϕ)
     scatter!(ts, v_measured, markercolor=:green,label="v measured")
     xlims!((0,10))
     plot(p1,p2,layout=(2,1),link=:x)
-end
-
-
-"Print result summary"
-function print_results(title, para_true, para, accept_ratio)
-    io = IOBuffer()
-    println(io, title)
-    println(io,"var, true, median, mean, mode, std-dev")
-    println(io,hcat(["A","ω","ϕ","σ"],
-                    para_true,
-                    round(median(para,2),2),
-                    round(mean(para,2),2),
-                    round(modehist(para),2),
-                    round(std(para,2),2) )
-            )
-    println(io, "Ratio of accepted/total steps: $accept_ratio")
-    println(io, "")
-    print(takebuf_string(io))
-end
-
-"""
-Calculate the mode of samples, i.e. where the pdf should be maximal.
-This may not be the best way.
-"""
-function modehist(samples, nbins=size(samples,2)÷10)
-    modes = Float64[]
-    for row in 1:size(samples,1)
-        r,h = hist(view(samples, row, 1:size(samples,2)), nbins)
-        push!(modes, r[findmax(h)[2]])
-    end
-    return modes
 end
