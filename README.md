@@ -18,13 +18,13 @@ logpdf{T}(x::T) = x<0 ? -convert(T,Inf) : -x
 theta0 = 0.5
 
 # Metropolis MCMC sampler:
-sample_prop_normal(theta) = 1.5*randn() + theta # sample of the proposal (or jump) distribution:
+sample_prop_normal(theta) = 1.5*randn() + theta # samples the proposal (or jump) distribution
 thetas, accept_ratio = metropolis(logpdf, sample_prop_normal, theta0, niter=10^5)
 println("Accept ratio Metropolis: $accept_ratio")
 
 # emcee MCMC sampler:
 thetase, accept_ratioe = emcee(logpdf, (theta0,0.1), niter=10^4, nchains=10)
-thetase, accept_ratioe = emcee_squash(thetase,accept_ratioe) # puts all chains into one
+thetase, accept_ratioe = squash_chains(thetase,accept_ratioe) # puts all chains into one
 println("Accept ratio emcee: $accept_ratioe")
 
 using Plots

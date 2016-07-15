@@ -1,22 +1,30 @@
-# A simple example doing Bayesian inference using MCMC and my
-# samplers.  This example assumes that the times of measurements are
-# errror-free.
+# A simple example doing Bayesian inference for a harmonic oscillator
+# using MCMC and the KissMCMC samplers.
+#
+# The forward model and other bits are defined in
+# bayesian-example-base.jl.
+#
+# This example assumes that the times of measurements are errror-free.
 
 # this is where the forward model, probabilistic model etc are defined.
 include("bayesian-example-base.jl")
 plotyes = false
+if plotyes
+    eval(:(using Plots,StatPlots)) # needs current master of StatPlots & on 0.5 of PyCall too (14 July 2016)
+end
 
-# make the synthetic data
+# make the synthetic xv_measured
 sigma = 0.3
-const ts, data, A, ω, ϕ, ts_true, data_true = make_data(para_true = [2.5, 1.1, 3], # [A, ω, ϕ]
+const ts, xv_measured, A, ω, ϕ, ts_true, xv_true = make_synthetic_measurements(para_true = [2.5, 1.1, 3], # [A, ω, ϕ]
                                                         sigma_x=sigma,
                                                         sigma_v=sigma,
                                                         sigma_t=0)
 @assert all(ts.==ts_true)
 
-## Plot the data
+## Plot the measurements
+
 # using Plots,StatPlots
-# plotdata(ts,data,A,ω,ϕ)
+plotyes && plotmeasurements(ts,xv_measured,A,ω,ϕ)
 
 # choose to use the analytic or ODE-forward model
 fwd! = [fwd_ana!, fwd_ode!][1]
@@ -31,11 +39,11 @@ const fwdout = init_fwd(ts) # Note, this will be modified in place
 # Likelilhood
 
 function loglikelihood(theta)
-    # Closure over fwdout, fwd!, data, ts
+    # Closure over fwdout, fwd!, xv_measured, ts
     # make sure those are `const`!
     A,ω,ϕ,sigma = theta
     fwd!(fwdout, ts, A,ω,ϕ)
-    loglikelihood(fwdout, data, sigma)
+    loglikelihood(fwdout, xv_measured, sigma)
 end
 
 # Normal & uniform priors
@@ -74,37 +82,28 @@ nburnin_e = niter_e÷2
 
 sig = 0.01  # this needs tuning, accept_ratio of 1/4 is good, they say.
 const sigma_ppdf = [sig, sig, sig, sig]
-function sample_ppdf(thetas)
-    A,ω,ϕ,sigma = thetas
-    out = similar(thetas)
-    out[1] = randn()*sigma_ppdf[1]+A
-    out[2] = randn()*sigma_ppdf[2]+ω
-    out[3] = randn()*sigma_ppdf[3]+ϕ
-    out[4] = randn()*sigma_ppdf[4]+sigma
-    return out
-end
+sample_ppdf(theta) = [randn()*sigma_ppdf[i]+theta[i] for i=1:length(theta)]
 
-thetas0 = [A, ω, ϕ, sigma];  # good IC
-thetas0 = [2.1, 1.1, 1.1, 0.2]; # decent IC
+theta0 = [A, ω, ϕ, sigma];  # good IC
+theta0 = [2.1, 1.1, 1.1, 0.2]; # decent IC
 # note that the emcee sampler does poorly with a poor IC!
-#thetas0 = [1.74,0.001, 0.25, 1.77] # bad IC
+#theta0 = [1.74,0.001, 0.25, 1.77] # bad IC
 
 @time 1
-metropolis(logposterior, sample_ppdf, thetas0, niter=2)
+metropolis(logposterior, sample_ppdf, theta0, niter=2)
 print("Metropolis: ")
-@time thetas_m, accept_ratio_m = metropolis(logposterior, sample_ppdf, thetas0,
+@time thetas_m, accept_ratio_m = metropolis(logposterior, sample_ppdf, theta0,
                                             niter=niter, nthin=nthin, nburnin=nburnin)
 print_results("Metropolis", [A,ω,ϕ,sigma], thetas_m, accept_ratio_m)
 
-emcee(logposterior, (thetas0, 0.1), niter=10, nchains=2)
+emcee(logposterior, (theta0, 0.1), niter=10, nchains=2)
 print("emcee:")
-@time thetas_ec, accept_ratio_ec = emcee(logposterior, (thetas0, 0.1),
+@time thetas_ec, accept_ratio_ec = emcee(logposterior, (theta0, 0.1),
                                          niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e)
 # When running this problem with IC far from the maximum, then emcee produces
 thetas_e, accept_ratio_e = squash_chains(thetas_ec, accept_ratio_ec, drop_low_accept_ratio=true)
 print_results("emcee", [A,ω,ϕ,sigma], thetas_e, accept_ratio_e)
 
-# using Plots,StatPlots # needs current master of StatPlots & on 0.5 of PyCall too (14 July 2016)
-#cornerplot(thetas_m[1:3,:]', label=["A","ω", "ϕ"])
+plotyes && cornerplot(thetas_m[1:3,:]', label=["A","ω", "ϕ"])
 
 nothing

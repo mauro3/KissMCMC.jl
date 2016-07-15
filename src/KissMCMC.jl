@@ -13,8 +13,8 @@ include("samplers-parallel.jl")
 #####
 
 """
-Find index at which auto-correlation drops to `corbound` (default
-0.0), trys the first maxlen (default 100) lags.
+Auto-correlation length: Find index at which auto-correlation drops to
+`corbound` (default 0.0), trys the first maxlen (default 100) lags.
 """
 function autocor_length(samples::AbstractVector, maxlen=100, corbound=0.0)
     lag = 1
@@ -32,5 +32,12 @@ function  autocor_length(samples::AbstractMatrix, maxlen=100, corbound=0.0)
     return len
 end
 
+"""
+Gelman Rubin statistics
+
+"""
+function gelman_rubin(chains)
+    error("not implemented")
+end
 
 end # module

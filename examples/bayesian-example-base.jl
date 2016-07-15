@@ -114,41 +114,41 @@ err1(y_measured, y_modelled) = (y_measured-y_modelled)^2
 
 
 """
-Log-Likelihood for given input data and given forward model result.
+Log-Likelihood for given input xv_measured and given forward model result.
 
 This assumes that the errors have a normal distribution with std-dev
 sigma.
 
 Input
 - fwdout -- result vector of forward model
-- data -- observation data points
+- xv_measured -- observation (x,v) points
 - sigma -- assumed std-dev of errors.  Can be a fitting parameter.
 
 Output:
 - likelihood
 """
-function loglikelihood(fwdout, data, sigma)
-    out = err1(data[1], fwdout[1])
-    N = length(data)
-    for i=2:N
+function loglikelihood(fwdout, xv_measured, sigma)
+    out = zero(err1(xv_measured[1], fwdout[1]))
+    N = length(xv_measured)
+    for i=1:N
         # Note the normalization term 1/2*log(2*pi*sigma^2) needs to
-        # be included when sigma is not constant.
-        out -= err1(data[i], fwdout[i])/(sigma^2) + log(2*pi*sigma^2)
+        # be included when sigma is also a fitting parameter.
+        out -= err1(xv_measured[i], fwdout[i])/(sigma^2) + log(2*pi*sigma^2)
     end
     return out/2
 end
-function loglikelihood(fwdout, data, sigma::AbstractVector)
-    out = err1(data[1], fwdout[1])
-    N = length(data)
-    for i=2:N
-        out -= err1(data[i], fwdout[i])/(sigma[i]^2)  + log(sqrt(2*pi*sigma[i]^2))
+function loglikelihood(fwdout, xv_measured, sigma::AbstractVector)
+    out = zero(err1(xv_measured[1], fwdout[1]))
+    N = length(xv_measured)
+    for i=1:N
+        out -= err1(xv_measured[i], fwdout[i])/(sigma[i]^2)  + log(sqrt(2*pi*sigma[i]^2))
     end
     return out/2
 end
 
 """
 Log-Likelihood of a set of parameters for a forward model and for
-given input data.  To be defined.
+given input xv_measured.  To be defined.
 
 Should probably have a signature:
 loglikelihood!(theta)
@@ -202,12 +202,12 @@ function logprior_sigma end  # sum of all sigma priors
 
 
 ##############################
-# Synthetic data
+# Synthetic xv_measured
 ##############################
 
 
 """
-Produce the synthetic data by running the forward model and adding noise.
+Produce the synthetic xv_measured by running the forward model and adding noise.
 
 Input:
     ts = 0:0.25:10, # time steps at which measurements are (supposed to be) taken
@@ -217,10 +217,10 @@ Input:
     sigma_t = 0.1 # std deviation of time errors
 
 Output:
-- ts, data -- the measured data: measurement times and values
-- ts_true, data_true  -- the true values of the system at the true measurement time
+- ts, xv_measured -- the measured xv_measured: measurement times and values
+- ts_true, xv_true  -- the true values of the system at the true measurement time
 """
-function make_data(;ts = 0:0.25:10, # time steps at which measurements are taken
+function make_synthetic_measurements(;ts = 0:0.25:10, # time steps at which measurements are taken
                    para_true = [2.5, 1.1, 3], # [A, ω, ϕ]
                    sigma_x = 0.3, # std deviation of measurement errors of x
                    sigma_v = 0.2, # std deviation of measurement errors of v
@@ -229,16 +229,16 @@ function make_data(;ts = 0:0.25:10, # time steps at which measurements are taken
     ns = length(ts)
     # add noise to the times:
     ts_true = ts + randn(ns)*sigma_t
-    data_true = fwd_ana(ts_true, para_true...)
-    xs = data_true[1:2:end]
-    vs = data_true[2:2:end]
+    xv_true = fwd_ana(ts_true, para_true...)
+    xs = xv_true[1:2:end]
+    vs = xv_true[2:2:end]
 
     # add noise
     x_measured = xs + sigma_x*randn(ns)
     v_measured = vs + sigma_v*randn(ns)
-    data = hcat(x_measured ,v_measured)'[:]
+    xv_measured = hcat(x_measured ,v_measured)'[:]
     A, ω, ϕ = para_true
-    return ts, data, A, ω, ϕ, ts_true, data_true
+    return ts, xv_measured, A, ω, ϕ, ts_true, xv_true
 end
 
 
@@ -250,10 +250,10 @@ end
 # "Plot distirbution of esitmated parameters"
 # plot_result(theta, theta_true) = plot_samples_vs_true(theta, theta_true; names=["ω","x0", "v0"])
 
-"Plots the true solution and the noisy synthetic data."
-function plotdata(ts, data, A, ω, ϕ)
-    x_measured = data[1:2:end]
-    v_measured = data[2:2:end]
+"Plots the true solution and the noisy synthetic measurements."
+function plotmeasurements(ts, xv_measured, A, ω, ϕ)
+    x_measured = xv_measured[1:2:end]
+    v_measured = xv_measured[2:2:end]
     t_plot = ts[1]:0.01:ts[end]
     x_plot,v_plot = asol(t_plot,A,ω,ϕ)
     p1 = plot(t_plot, x_plot, label="x", ylabel="x")
