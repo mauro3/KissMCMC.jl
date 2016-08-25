@@ -50,7 +50,7 @@ Other serial samplers:
 
 - improve parallel samplers
 - refactor serial and parallel samplers into one?
-- add convergence tests: autocorrelation, autocovariance
+- add convergence tests: autocorrelation, autocovariance, Gelman-Rubin
 - tests: better ways to test convergence for Rosenbrock pdf
 
 # References
