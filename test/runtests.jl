@@ -1,4 +1,6 @@
-addprocs(2)
+if VERSION>=v"0.5-"
+    addprocs(2) # segfaults on 0.4
+end
 @everywhere using KissMCMC
 @everywhere using Base.Test
 @everywhere import Distributions

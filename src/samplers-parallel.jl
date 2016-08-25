@@ -53,23 +53,24 @@ function metropolisp(pdf, sample_ppdf, theta0;
                      nchains=nothing,
                      nthin=1,
                      logpdf=true,
-                     hasblob=false
+                     hasblob=false,
+                     blob_reduce! = default_blob_reduce!,
                      )
     if nchains!=nothing
         warn("nchains keyword not supported")
     end
     # intialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, make_SharedArray=true)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
     naccept = SharedArray(Int, nchains, init = S->S[:]=0)
     ni = SharedArray(Int, nchains, init = S->S[:]=1)
 
     # run
     _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
-                  naccept, ni)
+                  naccept, ni, blob_reduce!)
 end
 function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
-                       naccept, ni)
+                       naccept, ni, blob_reduce!)
     N = length(theta0s[1])
     @sync @parallel for nc=1:nchains
         @inbounds for n=(1-nburnin):(niter-nburnin)
@@ -87,7 +88,7 @@ function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, ni
             end
             if n>0 && rem(n,nthin)==0
                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
-                _setindex!(blobs, blob0s[nc], ni[nc], nc)
+                blob_reduce!(blobs, blob0s[nc], ni[nc], nc)
                 ni[nc] +=1
             end
         end
@@ -153,10 +154,11 @@ function emceep(pdf, theta0;
                 logpdf=true,
                 nthin=1,
                 a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-                hasblob=false
+                hasblob=false,
+                blob_reduce! = default_blob_reduce!,
                 )
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, make_SharedArray=true)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
     nchains<2 && error("Need nchains>1")
 
     # make theta0s blob0s into SharedArray
@@ -186,12 +188,12 @@ function emceep(pdf, theta0;
     # do the MCMC
     _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf_,
                      niter, nburnin, nchains, nthin, pdftype, a_scale,
-                     naccept, ni)
+                     naccept, ni, blob_reduce!)
 end
 
 function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf,
                           niter, nburnin, nchains, nthin, pdftype, a_scale,
-                          naccept, ni)
+                          naccept, ni, blob_reduce!)
     N = size(theta0s,1) # number of parameters
     # the two sets
     nchains12 = UnitRange{Int}[1:nchains÷2, nchains÷2+1:nchains]
@@ -226,10 +228,10 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
                 if  n>0 && rem(n,nthin)==0
                     if isscalar==IsScalar()
                         _setindex!(thetas, theta0s[:,nc][1], ni[nc], nc)
-                        _setindex!(blobs, blob0s[:,nc][1], ni[nc], nc)
+                        blob_reduce!(blobs, blob0s[:,nc][1], ni[nc], nc)
                     else
                         _setindex!(thetas, theta0s[:,nc], ni[nc], nc)
-                        _setindex!(blobs, blob0s[:,nc], ni[nc], nc)
+                        blob_reduce!(blobs, blob0s[:,nc], ni[nc], nc)
                     end
                     ni[nc] +=1
                 end

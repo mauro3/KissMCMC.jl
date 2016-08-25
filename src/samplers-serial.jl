@@ -149,7 +149,7 @@ allow for all the different input combinations.
 
 If nchains==0 then assume that this MCMC cannot handle several chains.
 """
-function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob; make_SharedArray=false)
+function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!; make_SharedArray=false)
 
     ntries = 100 # how many tries to find a IC with nonzero density
 
@@ -157,7 +157,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     pdf = hasblob ? pdf_ : theta -> (pdf_(theta), nothing)
 
     # Make initial chain positions and value of blob0 and p0
-    if nchains==0 # a single theta is given an no chains are used, i.e. a single chain algo
+    if nchains==0 # a single theta is given and no chains are used, i.e. a single chain algo
         p0, blob0 = pdf(theta0)
         comp2zero(p0, pdftype) && error("theta0=$(theta0) has zero density.  Choose another theta0.")
     elseif isa(theta0, Tuple) # Case: (theta0, ball_radius) Can only be used with Float parameters
@@ -252,12 +252,12 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     if nchains==0
         # Initialize output storage
         thetas = _make_storage(theta0, niter, nburnin, nthin)
-        blobs = _make_storage(blob0, niter, nburnin, nthin)
+        blobs = _make_storage(blob_reduce!(blob0), niter, nburnin, nthin)
         return pdf, p0, theta0, blob0, thetas, blobs, nchains, pdftype
     else
         # Initialize output storage
         thetas = _make_storage(theta0s[1], niter, nburnin, nthin, nchains)
-        blobs = _make_storage(blob0s[1], niter, nburnin, nthin, nchains)
+        blobs = _make_storage(blob_reduce!(blob0s[1]), niter, nburnin, nthin, nchains)
 
         if make_SharedArray
             if !isbits(eltype(theta0s[1]))
@@ -280,6 +280,10 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     end
 end
 
+
+default_blob_reduce!(new_blob) = new_blob
+default_blob_reduce!(stored_blob, new_blob, ni) = _setindex!(stored_blob, new_blob, ni)
+default_blob_reduce!(stored_blob, new_blob, nc, ni) = _setindex!(stored_blob, new_blob, nc, ni)
 
 ## The serial MCMC samplers
 ###########################
@@ -311,6 +315,9 @@ Optional keyword input:
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
+- blob_reduce! -- a function which updates the stored-blob with a
+                     new blob, eg. to accommodate calculations made
+                     with OnlineStats.jl. See below section.
 
 Output:
 
@@ -320,24 +327,35 @@ Output:
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 
+## Blobs and reduction:
+
+The reduce-function needs to have two methods: one to initialize the
+storage blob `new_blob -> storage_blob` and one to reduce a new blob
+into the storage blob `(stored_blob, new_blob, ni[, nc]) -> nothing`
+(updating stored_blob in-place).  `ni` is the iteration number, `nc`
+is the chain number, if applicable.
+
+
+
 """
 function metropolis(pdf, sample_ppdf, theta0;
                     niter=10^5,
                     nburnin=niter÷10,
                     logpdf=true,
                     nthin=1,
-                    hasblob=false
+                    hasblob=false,
+                    blob_reduce! = default_blob_reduce!,
                     )
 
     # intialize
     nchains = 0
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, make_SharedArray=true)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
 
     # run
-    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype)
+    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
 end
-function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype)
+function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
     naccept = 0
     ni = 1
     @inbounds for n=(1-nburnin):(niter-nburnin)
@@ -355,7 +373,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
         end
         if n>0 && rem(n,nthin)==0
             _setindex!(thetas, theta0, ni)
-            _setindex!(blobs, blob0, ni)
+            blob_reduce!(blobs, blob0, ni)
             ni +=1
         end
     end
@@ -420,16 +438,17 @@ function emcee(pdf, theta0;
                logpdf=true,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-               hasblob=false
+               hasblob=false,
+               blob_reduce! =default_blob_reduce!, # note the space after `!`
                )
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, make_SharedArray=false)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
     # do the MCMC
-    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter, nburnin, nchains, nthin, pdftype, a_scale)
+    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!)
 end
 const debug = Int[]
-function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale)
+function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
     ni = ones(Int, nchains)
@@ -464,7 +483,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
             # store theta after burn-in
             if  n>0 && rem(n,nthin)==0
                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
-                _setindex!(blobs, blob0s[nc], ni[nc], nc)
+                blob_reduce!(blobs, blob0s[nc], ni[nc], nc)
                 ni[nc] +=1
             end
         end # for nc =1:nchains
