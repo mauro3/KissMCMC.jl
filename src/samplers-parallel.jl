@@ -86,8 +86,8 @@ function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, ni
                 end
             end
             if n>0 && rem(n,nthin)==0
-                _setindex!(thetas, theta0s[nc], nc, ni[nc])
-                _setindex!(blobs, blob0s[nc], nc, ni[nc])
+                _setindex!(thetas, theta0s[nc], ni[nc], nc)
+                _setindex!(blobs, blob0s[nc], ni[nc], nc)
                 ni[nc] +=1
             end
         end
@@ -225,11 +225,11 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
                 end
                 if  n>0 && rem(n,nthin)==0
                     if isscalar==IsScalar()
-                        _setindex!(thetas, theta0s[:,nc][1], nc, ni[nc])
-                        _setindex!(blobs, blob0s[:,nc][1], nc, ni[nc])
+                        _setindex!(thetas, theta0s[:,nc][1], ni[nc], nc)
+                        _setindex!(blobs, blob0s[:,nc][1], ni[nc], nc)
                     else
-                        _setindex!(thetas, theta0s[:,nc], nc, ni[nc])
-                        _setindex!(blobs, blob0s[:,nc], nc, ni[nc])
+                        _setindex!(thetas, theta0s[:,nc], ni[nc], nc)
+                        _setindex!(blobs, blob0s[:,nc], ni[nc], nc)
                     end
                     ni[nc] +=1
                 end
@@ -387,8 +387,8 @@ end
 #                 end
 #             end
 #             if n>0 && rem(n,nthin)==0
-#                 _setindex!(thetas, theta0s[nc], nc, ni[nc])
-#                 _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
+#                 _setindex!(blobs, blob0s[nc], ni[nc], nc)
 #                 ni[nc] +=1
 #             end
 #         end
@@ -618,8 +618,8 @@ end
 #                 end
 #             end
 #             if  n>0 && rem(n,nthin)==0
-#                 _setindex!(thetas, theta0s[nc], nc, ni[nc])
-#                 _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
+#                 _setindex!(blobs, blob0s[nc], ni[nc], nc)
 #                 ni[nc] +=1
 #             end
 #         end # for nc =1:nchains
@@ -687,8 +687,8 @@ end
 #                     end
 #                 end
 #                 if  n>0 && rem(n,nthin)==0
-#                     _setindex!(thetas, theta0s[nc], nc, ni[nc])
-#                     _setindex!(blobs, blob0s[nc], nc, ni[nc])
+#                     _setindex!(thetas, theta0s[nc], ni[nc], nc)
+#                     _setindex!(blobs, blob0s[nc], ni[nc], nc)
 #                     ni[nc] +=1
 #                 end
 #             end # for nc in ncs

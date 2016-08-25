@@ -119,32 +119,28 @@ _make_storage(theta0::Void, args...) = nothing
 _make_storage(theta::Vector, niter, nburnin) = Array(eltype(theta), length(theta), niter-nburnin)
 _make_storage(theta, niter, nburnin) = Array(eltype(theta), niter-nburnin)
 # Storing (niter-nburnin)/nthin values in a Vector or Array
-_make_storage(theta0::Vector, niter, nburnin, nthin) = Array(eltype(theta0), length(theta0), floor(Int, (niter-nburnin)/nthin))
-_make_storage(theta0, niter, nburnin, nthin) = Array(eltype(theta0), floor(Int, (niter-nburnin)/nthin))
+_make_storage(theta0::Vector, niter, nburnin, nthin) = Array(eltype(theta0), length(theta0), (niter-nburnin)÷nthin)
+_make_storage(theta0, niter, nburnin, nthin) = Array(eltype(theta0), (niter-nburnin)÷nthin)
 # Storing (niter-nburnin)/nthin x nchain values in 2D or 3D array
-_make_storage(theta0::Vector, niter, nburnin, nthin, nchains) = Array(eltype(theta0), length(theta0), nchains, floor(Int, (niter-nburnin)/nthin))
-_make_storage(theta0, niter, nburnin, nthin, nchains) = Array(eltype(theta0), nchains, floor(Int, (niter-nburnin)/nthin))
+_make_storage(theta0::Vector, niter, nburnin, nthin, nchains) = Array(eltype(theta0), length(theta0), (niter-nburnin)÷nthin, nchains)
+_make_storage(theta0, niter, nburnin, nthin, nchains) = Array(eltype(theta0), (niter-nburnin)÷nthin, nchains)
 
 
 """
 Used to be able to write code which is agnostic to vector-like or scalar-like parameters
 
-`_setindex!(samples, theta, n)`
+`_setindex!(samples, theta, n[, nc])`
 
- - if typeof(samples)!=Vector then writes to a Matrix
- - if typeof(samples)==Vector then writes to a Vector{Vector}
+- if typeof(theta)==Vector then writes to a Matrix
+- if typeof(theta)!=Vector then writes to a Vector{Vector}
 
 Note that internally a copy (but not deepcopy) is made of the input.
 """
 function _setindex! end
 # fallback for blobs of ::Void
 _setindex!(::Void, args...) = nothing
-# Matrix{Scalar} vs Vector{Vector}
-_setindex!(samples::AbstractMatrix, theta, n) = samples[:,n]=theta
-_setindex!(samples, theta, n) = samples[n]=copy(theta)
-#
-_setindex!{T}(samples::AbstractArray{T,3}, theta, nc, i) = samples[:,nc,i]=theta
-_setindex!{T}(samples::AbstractArray{T,2}, theta, nc, i) = samples[nc, i]=copy(theta)
+_setindex!(samples::AbstractArray, theta::Vector, i, nc=1) = samples[:,i,nc]=theta
+_setindex!(samples::AbstractArray, theta, i, nc=1) = samples[i, nc]=copy(theta)
 
 
 """
@@ -467,8 +463,8 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
             end
             # store theta after burn-in
             if  n>0 && rem(n,nthin)==0
-                _setindex!(thetas, theta0s[nc], nc, ni[nc])
-                _setindex!(blobs, blob0s[nc], nc, ni[nc])
+                _setindex!(thetas, theta0s[nc], ni[nc], nc)
+                _setindex!(blobs, blob0s[nc], ni[nc], nc)
                 ni[nc] +=1
             end
         end # for nc =1:nchains
@@ -478,8 +474,14 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
     return thetas, accept_ratio, blobs
 end
 
-"Puts the samples of all chains into one vector."
-function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false)
+"""
+
+Puts the samples of all chains into one vector.
+
+drop_fact -> decrease to drop more chains
+"""
+function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false,
+                                                                 drop_fact=1)
     nchains=length(accept_ratio)
     chaines2keep = trues(nchains)
     if drop_low_accept_ratio
@@ -488,7 +490,7 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
         # acceptance ratio, thus filter them out.
         ma,sa = median(accept_ratio), std(accept_ratio)
         for nc=1:nchains
-            if accept_ratio[nc]<ma-1*sa # this 1 is heuristic
+            if accept_ratio[nc]<ma-drop_fact*sa # this 1 is heuristic
                 println("Dropping low accept-ratio chain $nc")
                 chaines2keep[nc] = false
             end
@@ -496,9 +498,9 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
     end
     # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
-        return thetas[:,chaines2keep,:][:,:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,chaines2keep,:][:,:]
+        return thetas[:,:,chaines2keep][:,:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,:,chaines2keep]
     else
-        return thetas[chaines2keep,:][:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[chaines2keep,:][:]
+        return thetas[:,chaines2keep][:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,chaines2keep]
     end
 end
 
