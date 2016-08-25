@@ -3,8 +3,6 @@
 [![Build Status](https://travis-ci.org/mauro3/KissMCMC.jl.svg?branch=master)](https://travis-ci.org/mauro3/KissMCMC.jl)
 [![Build Status](https://ci.appveyor.com/api/projects/status/github/mauro3/KissMCMC.jl?branch=master&svg=true)](https://ci.appveyor.com/project/mauro3/kissmcmc-jl/branch/master)
 
-**NOTE: this does not work yet...**
-
 Got a probability density function you want to draw samples from?
 Don't want to learn all the fancy stuff of the fancy sampler packages?
 The KissMCMC (Keep it simple, stupid, MCMC) package intends to provide
