@@ -252,12 +252,12 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     if nchains==0
         # Initialize output storage
         thetas = _make_storage(theta0, niter, nburnin, nthin)
-        blobs = _make_storage(blob_reduce!(blob0), niter, nburnin, nthin)
+        blobs = blob_reduce!(blob0, niter, nburnin, nthin)
         return pdf, p0, theta0, blob0, thetas, blobs, nchains, pdftype
     else
         # Initialize output storage
         thetas = _make_storage(theta0s[1], niter, nburnin, nthin, nchains)
-        blobs = _make_storage(blob_reduce!(blob0s[1]), niter, nburnin, nthin, nchains)
+        blobs = blob_reduce!(blob0s[1], niter, nburnin, nthin, nchains)
 
         if make_SharedArray
             if !isbits(eltype(theta0s[1]))
@@ -281,9 +281,14 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
 end
 
 
-default_blob_reduce!(new_blob) = new_blob
-default_blob_reduce!(stored_blob, new_blob, ni) = _setindex!(stored_blob, new_blob, ni)
-default_blob_reduce!(stored_blob, new_blob, nc, ni) = _setindex!(stored_blob, new_blob, nc, ni)
+# initialize storage:
+default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int) =
+    _make_storage(new_blob, niter, nburnin, nthin)
+default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int, nchains::Int) =
+    _make_storage(new_blob, niter, nburnin, nthin, nchains)
+# update storage-blob
+default_blob_reduce!(stored_blob, new_blob, ni::Int) = _setindex!(stored_blob, new_blob, ni)
+default_blob_reduce!(stored_blob, new_blob, ni::Int, nc::Int) = _setindex!(stored_blob, new_blob, ni, nc)
 
 ## The serial MCMC samplers
 ###########################
@@ -500,7 +505,9 @@ Puts the samples of all chains into one vector.
 drop_fact -> decrease to drop more chains
 """
 function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false,
-                                                                 drop_fact=1)
+                                                                 drop_fact=1,
+                                                                 blob_reduce! =default_blob_reduce!,
+                                                                 )
     nchains=length(accept_ratio)
     chaines2keep = trues(nchains)
     if drop_low_accept_ratio
@@ -516,11 +523,25 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
         end
     end
     # TODO: below creates too many temporary arrays
+    # TODO: use blob_reduce! to reduce the blob into one.
     if ndims(thetas)==3
-        return thetas[:,:,chaines2keep][:,:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,:,chaines2keep]
+        t = thetas[:,:,chaines2keep][:,:]
     else
-        return thetas[:,chaines2keep][:], mean(accept_ratio[chaines2keep]), blobs==nothing ? nothing : blobs[:,chaines2keep]
+        t= thetas[:,chaines2keep][:]
     end
+    if blobs==nothing
+        b = nothing
+    else
+        if ndims(blobs)==3
+            b = blobs[:,:,chaines2keep]
+        elseif ndims(blobs)==2
+            b = blobs[:,chaines2keep]
+        else
+            b = blobs[chaines2keep]
+        end
+    end
+
+    return t, mean(accept_ratio[chaines2keep]), b
 end
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."

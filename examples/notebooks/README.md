@@ -9,3 +9,4 @@ Rendered versions are:
 - [Simple example](http://nbviewer.jupyter.org/github/mauro3/KissMCMC.jl/blob/master/examples/notebooks/bayesian-ex-simple.ipynb)
 - [Fitting more parameters](http://nbviewer.jupyter.org/github/mauro3/KissMCMC.jl/blob/master/examples/notebooks/bayesian-ex-fitting-times.ipynb)
 - [Making predictions](http://nbviewer.jupyter.org/github/mauro3/KissMCMC.jl/blob/master/examples/notebooks/bayesian-ex-predictions.ipynb)
+- [Making predictions with blob-reduce](http://nbviewer.jupyter.org/github/mauro3/KissMCMC.jl/blob/master/examples/notebooks/bayesian-ex-predictions-v2.ipynb)
