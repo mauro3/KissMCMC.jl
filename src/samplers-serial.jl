@@ -261,6 +261,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
 
         if make_SharedArray
             if !isbits(eltype(theta0s[1]))
+                # SharedArrays only work with isbits types
                 error("Only isbits types supported in parallel runs for eltype(theta).")
             end
             p0s, thetas = map(x->convert(SharedArray,x), (p0s, thetas))
@@ -289,6 +290,10 @@ default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int, nchains::In
 # update storage-blob
 default_blob_reduce!(stored_blob, new_blob, ni::Int) = _setindex!(stored_blob, new_blob, ni)
 default_blob_reduce!(stored_blob, new_blob, ni::Int, nc::Int) = _setindex!(stored_blob, new_blob, ni, nc)
+# squash chains
+default_blob_reduce!{T}(blobs::Array{T,3}, chains2keep) = blobs[:,:,chaines2keep]
+default_blob_reduce!{T}(blobs::Array{T,2}, chains2keep) = blobs[:,chaines2keep]
+default_blob_reduce!{T}(blobs::Array{T,1}, chains2keep) = blobs[chaines2keep]
 
 ## The serial MCMC samplers
 ###########################
@@ -509,21 +514,23 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  )
     nchains=length(accept_ratio)
-    chaines2keep = trues(nchains)
     if drop_low_accept_ratio
+        chaines2keep = Int[]
         # this is a bit of a hack, but emcee seems to sometimes have
         # chains which are stuck in oblivion.  These have a very low
         # acceptance ratio, thus filter them out.
         ma,sa = median(accept_ratio), std(accept_ratio)
         for nc=1:nchains
-            if accept_ratio[nc]<ma-drop_fact*sa # this 1 is heuristic
+            if accept_ratio[nc]>=ma-drop_fact*sa # this 1 is heuristic
                 println("Dropping low accept-ratio chain $nc")
-                chaines2keep[nc] = false
+                push!(chaines2keep, nc)
             end
         end
+    else
+        chaines2keep = collect(1:nchains) # collect to make chaines2keep::Vector{Int}
     end
+
     # TODO: below creates too many temporary arrays
-    # TODO: use blob_reduce! to reduce the blob into one.
     if ndims(thetas)==3
         t = thetas[:,:,chaines2keep][:,:]
     else
@@ -532,13 +539,7 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
     if blobs==nothing
         b = nothing
     else
-        if ndims(blobs)==3
-            b = blobs[:,:,chaines2keep]
-        elseif ndims(blobs)==2
-            b = blobs[:,chaines2keep]
-        else
-            b = blobs[chaines2keep]
-        end
+        b = blob_reduce!(blobs, chaines2keep)
     end
 
     return t, mean(accept_ratio[chaines2keep]), b
