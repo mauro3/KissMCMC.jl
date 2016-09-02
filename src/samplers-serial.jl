@@ -504,14 +504,16 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
 end
 
 """
-
 Puts the samples of all chains into one vector.
 
-drop_fact -> decrease to drop more chains
+Can drop chains which have a low accept ratio (this can happen with
+emcee), by setting drop_low_accept_ratio.  drop_fact -> decrease to
+drop more chains
 """
 function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false,
                                                                  drop_fact=1,
                                                                  blob_reduce! =default_blob_reduce!,
+                                                                 verbose=true,
                                                                  )
     nchains=length(accept_ratio)
     if drop_low_accept_ratio
@@ -520,11 +522,13 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
         # chains which are stuck in oblivion.  These have a very low
         # acceptance ratio, thus filter them out.
         ma,sa = median(accept_ratio), std(accept_ratio)
+        verbose && println("Median accept ratio is $ma, standard deviation is $sa\n")
         for nc=1:nchains
             if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
-                println("Dropping low accept-ratio chain $nc")
-                push!(chaines2keep, nc)
+                verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
+                continue
             end
+            push!(chaines2keep, nc)
         end
     else
         chaines2keep = collect(1:nchains) # collect to make chaines2keep::Vector{Int}
@@ -548,9 +552,7 @@ end
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
 g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
 
-"""
-Inverse cdf of g-pdf, see eq. 10 of Foreman-Mackey et al. 2013.
-"""
+"Inverse cdf of g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
 cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
