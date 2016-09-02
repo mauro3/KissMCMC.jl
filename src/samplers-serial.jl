@@ -368,7 +368,7 @@ end
 function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
     naccept = 0
     ni = 1
-    @inbounds for n=(1-nburnin):(niter-nburnin)
+    @inbounds @showprogress for n=(1-nburnin):(niter-nburnin)
         # take a step:
         theta1 = sample_ppdf(theta0)
         p1, blob1 = pdf(theta1)
@@ -464,7 +464,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
     ni = ones(Int, nchains)
     N = length(theta0s[1])
 
-    @inbounds for n = (1-nburnin):(niter-nburnin)
+    @inbounds @showprogress for n = (1-nburnin):(niter-nburnin)
         for nc = 1:nchains
             # draw a random other chain
             no = rand(1:nchains-1)
@@ -521,7 +521,7 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
         # acceptance ratio, thus filter them out.
         ma,sa = median(accept_ratio), std(accept_ratio)
         for nc=1:nchains
-            if accept_ratio[nc]>=ma-drop_fact*sa # this 1 is heuristic
+            if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
                 println("Dropping low accept-ratio chain $nc")
                 push!(chaines2keep, nc)
             end

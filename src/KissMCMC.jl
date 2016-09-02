@@ -1,5 +1,6 @@
 module KissMCMC
 using StatsBase
+using ProgressMeter
 import Compat.view
 
 export inverse_transform_sample, rejection_sample_unif, rejection_sample,

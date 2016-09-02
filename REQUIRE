@@ -1,4 +1,5 @@
-julia
+julia 0.4
 StatsBase
 Distributions
-FastAnonymous
+Compat
+ProgressMeter
