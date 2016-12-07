@@ -105,8 +105,10 @@ for dimensions=1:2
             emcee(logpdf, (0.5, 0.1), niter=10, nchains=10);
             print("emcee           : ")
             @time thetas_e, accept_ratio_e = emcee(logpdf, (0.5, 0.1), niter=n÷100, nchains=100);
-            thetas_e, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
-            test_mean_std(sa, thetas_e)
+            thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e );
+            test_mean_std(sa, thetas_e_)
+            thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e, order=true );
+            test_mean_std(sa, thetas_e_)
         end
 
     elseif dimensions==2
@@ -201,8 +203,10 @@ for dimensions=1:2
             emcee(logpdf, ([0.5,0.5], 0.1), niter=10, nchains=10);
             print("emcee           : ")
             @time thetas_e, accept_ratio_e = emcee(logpdf, ([0.5,0.5], 0.1), niter=n÷100, nchains=100);
-            thetas_e, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
-            test_mean_std(sa2, thetas_e, diff)
+            thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e );
+            test_mean_std(sa2, thetas_e_, diff)
+            thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e, order=true);
+            test_mean_std(sa2, thetas_e_, diff)
         end
 
         println("\n\nTwo dimensional parallel tests:\n")
@@ -233,14 +237,18 @@ for dimensions=1:2
                 print("Metropolisp    : ")
                 metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
                 @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
-                thetasp, accept_ratiop = squash_chains(thetasp, accept_ratiop );
-                test_mean_std(sa2, thetasp, diff)
+                thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop );
+                test_mean_std(sa2, thetasp_, diff)
+                thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop, order=true );
+                test_mean_std(sa2, thetasp_, diff)
 
                 print("emceep          : ")
                 emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
                 @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
-                thetas_ep, accept_ratio_ep = squash_chains(thetas_ep, accept_ratio_ep );
-                test_mean_std(sa2, thetas_ep, diff)
+                thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep );
+                test_mean_std(sa2, thetas_ep_, diff)
+                thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep, order=true );
+                test_mean_std(sa2, thetas_ep_, diff)
             end
         end
     end

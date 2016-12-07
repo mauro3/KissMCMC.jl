@@ -1,5 +1,5 @@
 module KissMCMC
-using StatsBase
+using StatsBase, DataFrames
 using ProgressMeter
 import Compat.view
 
@@ -56,8 +56,10 @@ Calculate the mode of samples, i.e. where the pdf should be maximal.
 This may not be the best way.
 """
 function modehist(samples::AbstractVector, nbins=length(samples)÷10)
-    r,h = hist(samples, nbins)
-    return r[findmax(h)[2]]
+    hh = fit(Histogram, samples, nbins=nbins)
+    r,h = hh.edges[1], hh.weights
+    #r,h = hist(samples, nbins)
+    return r[findmax(h)[2]]+step(r)/2
 end
 
 function modehist(samples::AbstractMatrix, nbins=size(samples,2)÷10)
@@ -72,42 +74,46 @@ end
 # Output
 ######
 
-"Print result summary"
-function print_results(thetas::Matrix, accept_ratio; title="", theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)],
-                       prec=2, maxvar=45)
+"Summary statistics of a run."
+function summarize_run(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)])
     nt = size(thetas,1)
     ns = size(thetas,2)
-    io = IOBuffer()
-    println(io, title)
-    println(io, "Ratio of accepted/total steps: $accept_ratio\n")
     if length(theta_true)>0
-        println(io,"var \t err\tmedian\t mean \t mode \t std")
-        for i=1:min(maxvar,nt)
-            n = names[i]
-            t = round(theta_true[i],prec)
-            m = round(median(view(thetas,i,1:ns)),prec)
-            err = round(abs(t-m),prec)
-            me  = round(mean(view(thetas,i,1:ns)),prec)
-            mo  = round(modehist(view(thetas,i,1:ns)),prec)
-            s = round(std(view(thetas,i,1:ns)),prec)
-            println(io, "$n \t $err \t $m \t $me \t $mo \t $s")
+        cols = Any[[], [],[],[],[],[]]
+        header = [:var, :err, :median, :mean, :mode, :std]
+
+        for i=1:nt
+            push!(cols[1], Symbol(names[i]))
+            t = theta_true[i]
+            m = median(view(thetas,i,1:ns))
+            push!(cols[2], abs(t-m))
+            push!(cols[3], median(view(thetas,i,1:ns)))
+            push!(cols[4], mean(view(thetas,i,1:ns)))
+            push!(cols[5], modehist(view(thetas,i,1:ns)))
+            push!(cols[6], std(view(thetas,i,1:ns)))
         end
     else
-        println(io,"var\tmedian \t mean \t mode \t std")
-        for i=1:min(maxvar,nt)
-            n = names[i]
-            m = round(median(view(thetas,i,1:ns)),prec)
-            me  = round(mean(view(thetas,i,1:ns)),prec)
-            mo  = round(modehist(view(thetas,i,1:ns)),prec)
-            s = round(std(view(thetas,i,1:ns)),prec)
-            println(io, "$n \t $m \t $me \t $mo \t $s")
+        cols = Any[[], [],[],[],[]]
+        header = [:var, :median, :mean, :mode, :std]
+        for i=1:nt
+            push!(cols[1], Symbol(names[i]))
+            push!(cols[2], median(view(thetas,i,1:ns)))
+            push!(cols[3], mean(view(thetas,i,1:ns)))
+            push!(cols[4], modehist(view(thetas,i,1:ns)))
+            push!(cols[5], std(view(thetas,i,1:ns)))
         end
+
     end
-    if maxvar<nt
-        print(io,"...")
-    end
-    println(io, "")
-    print(takebuf_string(io))
+    DataFrame(cols, header)
+end
+
+"Print result summary"
+function print_results(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)],
+                           maxvar=45)
+    println("Ratio of accepted/total steps: $accept_ratio\n")
+    out = summarize_run(thetas, accept_ratio, theta_true=theta_true, names=names)
+    show(out[1:min(size(out,1),maxvar),:])
+    nothing
 end
 
 

@@ -316,7 +316,7 @@ Input:
 
 - sample_ppdf -- draws a sample for the proposal/jump distribution
                  `sample_ppdf(theta)`
-- theta0 -- initial value of parameters
+- theta0 -- initial value of parameters (<:AbstractVector)
 
 Optional keyword input:
 
@@ -357,7 +357,7 @@ function metropolis(pdf, sample_ppdf, theta0;
                     blob_reduce! = default_blob_reduce!,
                     )
 
-    # intialize
+    # initialize
     nchains = 0
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
@@ -368,7 +368,10 @@ end
 function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
     naccept = 0
     ni = 1
-    @inbounds @showprogress for n=(1-nburnin):(niter-nburnin)
+    rng = (1-nburnin):(niter-nburnin)
+    p = Progress(length(rng)÷nthin, 1, "Metropolis: ", 25)
+    nn = 1
+    @inbounds for n=rng
         # take a step:
         theta1 = sample_ppdf(theta0)
         p1, blob1 = pdf(theta1)
@@ -377,14 +380,20 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
             theta0 = theta1
             blob0 = blob1
             p0 = p1
+            naccept += 1
+        end
+        if rem(n,nthin)==0
+            ProgressMeter.next!(p; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
             if n>0
-                naccept += 1
+                _setindex!(thetas, theta0, ni)
+                blob_reduce!(blobs, blob0, ni)
+                ni +=1
             end
         end
-        if n>0 && rem(n,nthin)==0
-            _setindex!(thetas, theta0, ni)
-            blob_reduce!(blobs, blob0, ni)
-            ni +=1
+        nn +=1 # number of steps
+        if n==0 # reset for non-burnin phase
+            naccept=0
+            nn=1
         end
     end
     accept_ratio = naccept/(niter-nburnin)
@@ -416,7 +425,7 @@ Input:
          (but not deepcopied) before storage.
 
 - theta0 -- initial parameters.
-  - If a tuple: choose random thetas around theta0[1] in a ball of radius theta0[2]
+  - If a tuple: choose random thetas around theta0[1] (<:AbstractVector) in a ball of radius theta0[2]
   - If a vector of vectors: use given starting points and that number of chains.
 
 Optional key-word input:
@@ -463,8 +472,10 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
     naccept = zeros(Int, nchains)
     ni = ones(Int, nchains)
     N = length(theta0s[1])
-
-    @inbounds @showprogress for n = (1-nburnin):(niter-nburnin)
+    nn = 1
+    rng = (1-nburnin):(niter-nburnin)
+    p = Progress(length(rng), 1, "emcee, nchains=$nchains: ", 25)
+    @inbounds for n = rng
         for nc = 1:nchains
             # draw a random other chain
             no = rand(1:nchains-1)
@@ -486,9 +497,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
                 p0s[nc] = p1
 
                 blob0s[nc] = blob1
-                if n>0
-                    naccept[nc] += 1
-                end
+                naccept[nc] += 1
             end
             # store theta after burn-in
             if  n>0 && rem(n,nthin)==0
@@ -497,6 +506,18 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
                 ni[nc] +=1
             end
         end # for nc =1:nchains
+        if n==0
+            naccept = zeros(naccept)
+            nn=1
+        end
+        macc = mean(naccept)
+        sacc = std(naccept)
+        outl = sum(abs(naccept-macc).>2*sacc)
+        ProgressMeter.next!(p; showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
+                                             (:accept_ratio_std, signif(sacc/nn,3)),
+                                             (:accept_ratio_outliers, outl),
+                                             (:burnin_phase, n<=0)])
+        nn +=1
     end # for n=(1-nburnin):(niter-nburnin)
 
     accept_ratio = [na/(niter-nburnin) for na in naccept]
@@ -508,12 +529,13 @@ Puts the samples of all chains into one vector.
 
 Can drop chains which have a low accept ratio (this can happen with
 emcee), by setting drop_low_accept_ratio.  drop_fact -> decrease to
-drop more chains
+drop more chains.
 """
-function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept_ratio=false,
+function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing; drop_low_accept_ratio=false,
                                                                  drop_fact=1,
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  verbose=true,
+                                                                 order=false
                                                                  )
     nchains=length(accept_ratio)
     if drop_low_accept_ratio
@@ -538,14 +560,26 @@ function squash_chains(thetas, accept_ratio=-1.0, blobs=nothing; drop_low_accept
     if ndims(thetas)==3
         t = thetas[:,:,chaines2keep][:,:]
     else
-        t= thetas[:,chaines2keep][:]
+        t = thetas[:,chaines2keep][:]
     end
     if blobs==nothing
         b = nothing
     else
         b = blob_reduce!(blobs, chaines2keep)
     end
-
+    if order # order such that early samples are early in thetas
+        nc = length(chaines2keep)
+        ns = size(thetas,1)
+        perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
+        if blobs!=nothing
+            b = b[perm]
+        end
+        if ndims(thetas)==3
+            t = t[:,perm]
+        else
+            t = t[perm]
+        end
+    end
     return t, mean(accept_ratio[chaines2keep]), b
 end
 
