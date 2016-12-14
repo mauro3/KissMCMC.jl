@@ -75,7 +75,7 @@ end
 ######
 
 "Summary statistics of a run."
-function summarize_run(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)])
+function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)])
     nt = size(thetas,1)
     ns = size(thetas,2)
     if length(theta_true)>0
@@ -111,7 +111,7 @@ end
 function print_results(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)],
                            maxvar=45)
     println("Ratio of accepted/total steps: $accept_ratio\n")
-    out = summarize_run(thetas, accept_ratio, theta_true=theta_true, names=names)
+    out = summarize_run(thetas, theta_true=theta_true, names=names)
     show(out[1:min(size(out,1),maxvar),:])
     nothing
 end
