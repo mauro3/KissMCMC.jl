@@ -525,11 +525,22 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
 end
 
 """
+    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing; drop_low_accept_ratio=false,
+                                                                 drop_fact=1,
+                                                                 blob_reduce! =default_blob_reduce!,
+                                                                 verbose=true,
+                                                                 order=false
+                                                                 )
 Puts the samples of all chains into one vector.
 
 Can drop chains which have a low accept ratio (this can happen with
 emcee), by setting drop_low_accept_ratio.  drop_fact -> decrease to
 drop more chains.
+
+Returns:
+- theta
+- mean(accept_ratio[chaines2keep])
+- blobs
 """
 function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing; drop_low_accept_ratio=false,
                                                                  drop_fact=1,
