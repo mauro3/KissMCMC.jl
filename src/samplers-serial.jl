@@ -92,15 +92,15 @@ end
 #######
 
 "Types used for dispatch depending on whether using a log-pdf or not."
-abstract PDFType
+@compat abstract type PDFType end
 immutable LogPDF<:PDFType end
-comp2zero(p, ::LogPDF) = p==-Inf
+comp2zero_nan(p, ::LogPDF) = p==-Inf || isnan(p)
 ratio(p1,p0, ::LogPDF) = p1-p0
 multiply(p1,p0, ::LogPDF) = p1+p0
 delog(p1, ::LogPDF) = exp(p1)
 
 immutable NonLogPDF<:PDFType end
-comp2zero(p, ::NonLogPDF) = p==0
+comp2zero_nan(p, ::NonLogPDF) = p==0 || isnan(p)
 ratio(p1,p0, ::NonLogPDF) = p1/p0
 multiply(p1,p0, ::NonLogPDF) = p1*p0
 delog(p1, ::NonLogPDF) = p1
@@ -109,21 +109,21 @@ delog(p1, ::NonLogPDF) = p1
 Create (output) storage array or vector, to be used with _setindex!
 `_make_storage(theta0, ni, nj)`
 
- - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
- - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
+ - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
+ - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 """
 function _make_storage end
 # Create no storage for nothings
 _make_storage(theta0::Void, args...) = nothing
 # Storing niter-nburnin values in a Vector or Array
-_make_storage(theta::Vector, niter, nburnin) = Array(eltype(theta), length(theta), niter-nburnin)
-_make_storage(theta, niter, nburnin) = Array(eltype(theta), niter-nburnin)
+_make_storage(theta::Vector, niter, nburnin) = Array{eltype(theta)}(length(theta), niter-nburnin)
+_make_storage(theta, niter, nburnin) = Array{eltype(theta)}(niter-nburnin)
 # Storing (niter-nburnin)/nthin values in a Vector or Array
-_make_storage(theta0::Vector, niter, nburnin, nthin) = Array(eltype(theta0), length(theta0), (niter-nburnin)÷nthin)
-_make_storage(theta0, niter, nburnin, nthin) = Array(eltype(theta0), (niter-nburnin)÷nthin)
+_make_storage(theta0::Vector, niter, nburnin, nthin) = Array{eltype(theta0)}(length(theta0), (niter-nburnin)÷nthin)
+_make_storage(theta0, niter, nburnin, nthin) = Array{eltype(theta0)}((niter-nburnin)÷nthin)
 # Storing (niter-nburnin)/nthin x nchain values in 2D or 3D array
-_make_storage(theta0::Vector, niter, nburnin, nthin, nchains) = Array(eltype(theta0), length(theta0), (niter-nburnin)÷nthin, nchains)
-_make_storage(theta0, niter, nburnin, nthin, nchains) = Array(eltype(theta0), (niter-nburnin)÷nthin, nchains)
+_make_storage(theta0::Vector, niter, nburnin, nthin, nchains) = Array{eltype(theta0)}(length(theta0), (niter-nburnin)÷nthin, nchains)
+_make_storage(theta0, niter, nburnin, nthin, nchains) = Array{eltype(theta0)}((niter-nburnin)÷nthin, nchains)
 
 
 """
@@ -159,9 +159,9 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     # Make initial chain positions and value of blob0 and p0
     if nchains==0 # a single theta is given and no chains are used, i.e. a single chain algo
         p0, blob0 = pdf(theta0)
-        comp2zero(p0, pdftype) && error("theta0=$(theta0) has zero density.  Choose another theta0.")
+        comp2zero_nan(p0, pdftype) && error("theta0=$(theta0) has zero density.  Choose another theta0.")
     elseif isa(theta0, Tuple) # Case: (theta0, ball_radius) Can only be used with Float parameters
-        comp2zero(pdf(theta0[1])[1], pdftype) && error("theta0[1]=$(theta0[1]) has zero density.  Choose another theta0[1].")
+        comp2zero_nan(pdf(theta0[1])[1], pdftype) && error("theta0[1]=$(theta0[1]) has zero density.  Choose another theta0[1].")
 
         # Initialize loop storage
         T = typeof(theta0[1])
@@ -181,7 +181,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
                 for j=1:ntries
                     tmp = theta0[1] + rand()*radius
                     p0, blob0 = pdf(tmp)
-                    if !comp2zero(p0,pdftype)
+                    if !comp2zero_nan(p0,pdftype)
                         push!(theta0s, tmp)
                         push!(blob0s, blob0)
                         push!(p0s, p0)
@@ -199,7 +199,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
                 for j=1:ntries
                     tmp = theta0[1] + rand(npara).*radius
                     p0, blob0 = pdf(tmp)
-                    if !comp2zero(p0,pdftype)
+                    if !comp2zero_nan(p0,pdftype)
                         push!(theta0s, tmp)
                         push!(blob0s, blob0)
                         push!(p0s, p0)
@@ -228,7 +228,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
         chains2drop = Int[]
         for nc =1:nchains
             p0, blob0 = pdf(theta0s[nc])
-            if comp2zero(p0,pdftype) #p0==0
+            if comp2zero_nan(p0,pdftype) #p0==0
                 warning("""Initial parameters of chain #$nc have zero probability density.
                         Skipping this chain.
                         theta0=$(theta0s[nc])
@@ -332,8 +332,8 @@ Optional keyword input:
 Output:
 
 - samples:
-  - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
-  - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
+  - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
+  - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 
@@ -356,7 +356,9 @@ function metropolis(pdf, sample_ppdf, theta0;
                     hasblob=false,
                     blob_reduce! = default_blob_reduce!,
                     )
-
+    if !hasblob
+        blob_reduce! = default_blob_reduce!
+    end
     # initialize
     nchains = 0
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
@@ -441,8 +443,8 @@ Optional key-word input:
 Output:
 
 - samples:
-  - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
-  - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
+  - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
+  - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 
@@ -460,6 +462,9 @@ function emcee(pdf, theta0;
                hasblob=false,
                blob_reduce! =default_blob_reduce!, # note the space after `!`
                )
+    if !hasblob
+        blob_reduce! = default_blob_reduce!
+    end
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
@@ -512,7 +517,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
         end
         macc = mean(naccept)
         sacc = std(naccept)
-        outl = sum(abs(naccept-macc).>2*sacc)
+        outl = sum(abs.(naccept.-macc).>2*sacc)
         ProgressMeter.next!(p; showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
                                              (:accept_ratio_std, signif(sacc/nn,3)),
                                              (:accept_ratio_outliers, outl),
@@ -569,7 +574,8 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
 
     # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
-        t = thetas[:,:,chaines2keep][:,:]
+        t = thetas[:,:,chaines2keep]
+        t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
     else
         t = thetas[:,chaines2keep][:]
     end

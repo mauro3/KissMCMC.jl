@@ -2,7 +2,8 @@ if VERSION>=v"0.5-"
     addprocs(2) # segfaults on 0.4
 end
 @everywhere using KissMCMC
-@everywhere using Base.Test
+@everywhere using Base.Test, Compat
+
 @everywhere import Distributions
 
 
@@ -134,7 +135,7 @@ for dimensions=1:2
                                     (() -> rand(mvn)),
                                     ((n) -> rand(mvn,n)),
                                     npdf2,
-                                    FloatRange{Float64}[-3:0.1:4, -12:0.1:12],
+                                    StepRangeLen{Float64}[-3:0.1:4, -12:0.1:12],
                                     "Normal",
                                     0.15
                                     ],
@@ -142,7 +143,7 @@ for dimensions=1:2
                                     (() -> NaN), # no analytic available
                                     ((n) -> NaN*ones(n)),
                                     rosenpdf,
-                                    FloatRange{Float64}[-4:0.1:6, -1:0.1:31],
+                                    StepRangeLen{Float64}[-4:0.1:6, -1:0.1:31],
                                     "Rosenbrock",
                                     0.3
                                     ]

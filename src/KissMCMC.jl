@@ -1,6 +1,7 @@
 module KissMCMC
 using StatsBase, DataFrames
 using ProgressMeter
+using Compat
 import Compat.view
 
 export inverse_transform_sample, rejection_sample_unif, rejection_sample,
@@ -56,7 +57,7 @@ Calculate the mode of samples, i.e. where the pdf should be maximal.
 This may not be the best way.
 """
 function modehist(samples::AbstractVector, nbins=length(samples)÷10)
-    hh = fit(Histogram, samples, nbins=nbins)
+    hh = fit(Histogram, samples, nbins=nbins, closed=:right)
     r,h = hh.edges[1], hh.weights
     #r,h = hist(samples, nbins)
     return r[findmax(h)[2]]+step(r)/2
