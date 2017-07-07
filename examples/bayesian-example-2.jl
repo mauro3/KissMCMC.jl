@@ -117,7 +117,7 @@ logprior = (theta) -> (logprior_A(theta[1]) +
                        logpriors_ts(getts(theta))
                        )
 
-logposterior = @anon theta -> loglikelihood(theta) + logprior(theta)
+logposterior = theta -> loglikelihood(theta) + logprior(theta)
 
 ######
 # MCMC

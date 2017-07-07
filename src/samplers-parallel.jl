@@ -62,8 +62,8 @@ function metropolisp(pdf, sample_ppdf, theta0;
     # intialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
-    naccept = SharedArray(Int, nchains, init = S->S[:]=0)
-    ni = SharedArray(Int, nchains, init = S->S[:]=1)
+    naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
+    ni = SharedArray{Int}(nchains, init = S->S[:]=1)
 
     # run
     _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
@@ -183,8 +183,8 @@ function emceep(pdf, theta0;
     theta1 = isscalar==IsScalar() ? zero(eltype(theta0s)) : zeros(eltype(theta0s), size(theta0s,1))
 
     # initialization and work arrays:
-    naccept = SharedArray(Int, nchains, init = S->S[:]=0)
-    ni = SharedArray(Int, nchains, init = S->S[:]=1)
+    naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
+    ni = SharedArray{Int}(nchains, init = S->S[:]=1)
     # do the MCMC
     _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf_,
                      niter, nburnin, nchains, nthin, pdftype, a_scale,
@@ -370,8 +370,8 @@ end
 #     _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nchains, nthin, pdftype)
 # end
 # function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nchains, nthin, pdftype)
-#     naccept = SharedArray(Int, nchains, init = S->S[:]=0)
-#     ni = SharedArray(Int, nchains, init = S->S[:]=1)
+#     naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
+#     ni = SharedArray{Int}(nchains, init = S->S[:]=1)
 #     N = length(theta0s[1])
 
 #     @sync @parallel for nc=1:nchains
@@ -591,8 +591,8 @@ end
 # end
 # function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale)
 #     # initialization and work arrays:
-#     naccept = SharedArray(Int, nchains, init = S->S[:]=0)
-#     ni = SharedArray(Int, nchains, init = S->S[:]=1)
+#     naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
+#     ni = SharedArray{Int}(nchains, init = S->S[:]=1)
 #     N = length(theta0s[1])
 
 #     #@inbounds

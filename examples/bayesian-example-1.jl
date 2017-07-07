@@ -47,6 +47,7 @@ function loglikelihood(theta)
     fwd!(fwdout, ts_measured, A,ω,ϕ)
     loglikelihood(fwdout, xv_measured, sigma)
 end
+Base.Test.@inferred loglikelihood([2.1, 1.1, 1.1, 0.2])
 
 # Normal & uniform priors
 logprior_A(A) = 0<=A ? 0.0 : -Inf # amplitude is positive
@@ -54,16 +55,19 @@ logprior_A(A) = 0<=A ? 0.0 : -Inf # amplitude is positive
 logprior_ω(ω) = 0<=ω<ω_max ? 0.0 : -Inf # ω is bounded
 logprior_ϕ(ϕ) = 0<=ϕ<2*pi ? 0.0 : -Inf # ϕ is bounded
 
-sigma_est = 0.2 # our prior estimate of sigma
-sigma_est_sigma = 0.2 # our estimate of the std of sigma
+const sigma_est = 0.2 # our prior estimate of sigma
+const sigma_est_sigma = 0.2 # our estimate of the std of sigma
 logprior_sigma(sigma) = sigma<=0 ? -Inf : -(sigma-sigma_est)^2/(2*sigma_est_sigma)
 
-logprior = (theta) -> (logprior_A(theta[1]) +
+const logprior = (theta) -> (logprior_A(theta[1]) +
                        logprior_ω(theta[2]) +
                        logprior_ϕ(theta[3]) +
                        logprior_sigma(theta[4]) )
+Base.Test.@inferred logprior([2.1, 1.1, 1.1, 0.2])
 
-logposterior = @anon theta -> loglikelihood(theta) + logprior(theta)
+logposterior = theta -> loglikelihood(theta) + logprior(theta)
+
+Base.Test.@inferred logposterior([2.1, 1.1, 1.1, 0.2])
 
 ######
 # MCMC

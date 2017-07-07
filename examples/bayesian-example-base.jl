@@ -10,14 +10,8 @@ using KissMCMC
 # using StatPlots # needs current master
 using StatsBase
 using ODE
+using BenchmarkTools
 import Compat.view
-if VERSION<v"0.5-"
-    eval(:(using FastAnonymous))
-else
-    macro anon(args)
-        args
-    end
-end
 
 # Note that there is a similar example here:
 # https://github.com/QuantifyingUncertainty/GMHExamples.jl/blob/master/ode/notebooks/SpringMass1.ipynb
@@ -62,8 +56,7 @@ function _fwd_ana!(out,ts,A,ω,ϕ)
     return out
 end
 
-# Using @anon should make it faster on Julia-0.4
-fwd_ana! = @anon (out,ts,A,ω,ϕ) -> _fwd_ana!(out,ts,A,ω,ϕ)
+fwd_ana! = (out,ts,A,ω,ϕ) -> _fwd_ana!(out,ts,A,ω,ϕ)
 fwd_ana = (ts,A,ω,ϕ) -> (out=init_fwd(ts); _fwd_ana!(out,ts,A,ω,ϕ); out)
 
 
@@ -190,7 +183,7 @@ function logprior_sigma end  # sum of all sigma priors
 # - log(prior)
 # """
 # Suggested form:
-# logprior = @anon (thetas, N_fwd) -> (logprior_A(thetas[1]) + logprior_ω(thetas[2]) +
+# logprior = (thetas, N_fwd) -> (logprior_A(thetas[1]) + logprior_ω(thetas[2]) +
 #                                      logprior_ϕ(thetas[3]) + logprior_ts(thetas[4:N_fwd]) +
 #                                      logprior_sigma(thetas[N_fwd+1:length(thetas)]))
 

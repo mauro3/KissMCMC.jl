@@ -109,8 +109,11 @@ function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i"
 end
 
 "Print result summary"
-function print_results(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)],
-                           maxvar=45)
+function print_results(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0),
+                       names=["$i" for i=1:size(thetas,1)],
+                       maxvar=45,
+                       title="")
+    println(title)
     println("Ratio of accepted/total steps: $accept_ratio\n")
     out = summarize_run(thetas, theta_true=theta_true, names=names)
     show(out[1:min(size(out,1),maxvar),:])

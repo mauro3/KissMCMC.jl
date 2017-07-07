@@ -364,14 +364,15 @@ function metropolis(pdf, sample_ppdf, theta0;
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
 
+    prog = Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis: ", 25)
+
     # run
-    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
+    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog)
 end
-function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!)
+function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog)
     naccept = 0
     ni = 1
     rng = (1-nburnin):(niter-nburnin)
-    p = Progress(length(rng)÷nthin, 1, "Metropolis: ", 25)
     nn = 1
     @inbounds for n=rng
         # take a step:
@@ -385,7 +386,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
             naccept += 1
         end
         if rem(n,nthin)==0
-            ProgressMeter.next!(p; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
+            ProgressMeter.next!(prog; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
             if n>0
                 _setindex!(thetas, theta0, ni)
                 blob_reduce!(blobs, blob0, ni)
@@ -468,18 +469,19 @@ function emcee(pdf, theta0;
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+    # initialize progress meter (type-unstable)
+    prog = Progress(length((1-nburnin):(niter-nburnin)), 1, "emcee, nchains=$nchains: ", 25)
     # do the MCMC
-    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!)
+    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
 end
 const debug = Int[]
-function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!)
+function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
     ni = ones(Int, nchains)
     N = length(theta0s[1])
     nn = 1
     rng = (1-nburnin):(niter-nburnin)
-    p = Progress(length(rng), 1, "emcee, nchains=$nchains: ", 25)
     @inbounds for n = rng
         for nc = 1:nchains
             # draw a random other chain
@@ -516,12 +518,12 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter, nburnin, nchai
             nn=1
         end
         macc = mean(naccept)
-        sacc = std(naccept)
+        sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
         outl = sum(abs.(naccept.-macc).>2*sacc)
-        ProgressMeter.next!(p; showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
-                                             (:accept_ratio_std, signif(sacc/nn,3)),
-                                             (:accept_ratio_outliers, outl),
-                                             (:burnin_phase, n<=0)])
+        ProgressMeter.next!(prog; showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
+                                                (:accept_ratio_std, signif(sacc/nn,3)),
+                                                (:accept_ratio_outliers, outl),
+                                                (:burnin_phase, n<=0)])
         nn +=1
     end # for n=(1-nburnin):(niter-nburnin)
 
