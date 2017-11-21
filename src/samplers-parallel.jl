@@ -129,7 +129,7 @@ Optional key-word input:
 
 - nchain -- number of chain to use (10^3).  If theta0 is vector of vectors, then set accordingly.
 - niter -- total number of steps to take (10^5) (==total number of posterior evaluations).
-- nburnin -- number of initial steps discarded, aka burn-in (niter/10/nchains)
+- nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
@@ -149,7 +149,7 @@ Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 function emceep(pdf, theta0;
                 nchains=10^2,
                 niter=10^4,
-                nburnin=niter÷10÷nchains,
+                nburnin=niter÷3,
                 logpdf=true,
                 nthin=1,
                 a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
@@ -157,9 +157,10 @@ function emceep(pdf, theta0;
                 blob_reduce! = default_blob_reduce!,
                 )
     niter_emcee = niter ÷ nchains
+    nburnin_emcee = nburnin ÷ nchains
 
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter_emcee, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
     nchains<2 && error("Need nchains>1")
 
     # make theta0s blob0s into SharedArray
@@ -188,19 +189,19 @@ function emceep(pdf, theta0;
     ni = SharedArray{Int}(nchains, init = S->S[:]=1)
     # do the MCMC
     _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf_,
-                     niter_emcee, nburnin, nchains, nthin, pdftype, a_scale,
+                     niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale,
                      naccept, ni, blob_reduce!)
 end
 
 function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf,
-                          niter_emcee, nburnin, nchains, nthin, pdftype, a_scale,
+                          niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale,
                           naccept, ni, blob_reduce!)
     N = size(theta0s,1) # number of parameters
     # the two sets
     nchains12 = UnitRange{Int}[1:nchains÷2, nchains÷2+1:nchains]
 
     #     @inbounds
-    for n = (1-nburnin):(niter_emcee-nburnin)
+    for n = (1-nburnin_emcee):(niter_emcee-nburnin_emcee)
         for i=1:2
             ncs = nchains12[i] # chains to update
             ncso = nchains12[mod1(i+1,2)] # other chains, to stretch-move with
@@ -238,9 +239,9 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
                 end
              end # for nc in ncs
         end # for i=1:2
-    end # for n=(1-nburnin):(niter_emcee-nburnin)
+    end # for n=(1-nburnin_emcee):(niter_emcee-nburnin_emcee)
 
-    accept_ratio = [na/(niter_emcee-nburnin) for na in naccept]
+    accept_ratio = [na/(niter_emcee-nburnin_emcee) for na in naccept]
 
     return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs)
 end

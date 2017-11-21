@@ -436,7 +436,7 @@ Optional key-word input:
 
 - nchain -- number of chain to use (10^3).  If theta0 is vector of vectors, then set accordingly.
 - niter -- total number of steps to take (10^5) (==total number of posterior evaluations).
-- nburnin -- number of initial steps discarded, aka burn-in (niter/10/nchain)
+- nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
@@ -456,7 +456,7 @@ Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 function emcee(pdf, theta0;
                nchains=10^2,
                niter=10^5,
-               nburnin=niter÷10÷nchains,
+               nburnin=niter÷3,
                logpdf=true,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
@@ -467,23 +467,24 @@ function emcee(pdf, theta0;
         blob_reduce! = default_blob_reduce!
     end
     niter_emcee = niter ÷ nchains
+    nburnin_emcee = nburnin ÷ nchains
 
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
-        _initialize(pdf, theta0, niter_emcee, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
     # initialize progress meter (type-unstable)
-    prog = Progress(length((1-nburnin):(niter_emcee-nburnin)), 1, "emcee, nchains=$nchains: ", 25)
+    prog = Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, nchains=$nchains: ", 25)
     # do the MCMC
-    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
+    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
 end
 const debug = Int[]
-function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
+function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
     ni = ones(Int, nchains)
     N = length(theta0s[1])
     nn = 1
-    rng = (1-nburnin):(niter_emcee-nburnin)
+    rng = (1-nburnin_emcee):(niter_emcee-nburnin_emcee)
     @inbounds for n = rng
         for nc = 1:nchains
             # draw a random other chain
@@ -527,9 +528,9 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin,
                                                 (:accept_ratio_outliers, outl),
                                                 (:burnin_phase, n<=0)])
         nn +=1
-    end # for n=(1-nburnin):(niter_emcee-nburnin)
+    end # for n=(1-nburnin_emcee):(niter_emcee-nburnin_emcee)
 
-    accept_ratio = [na/(niter_emcee-nburnin) for na in naccept]
+    accept_ratio = [na/(niter_emcee-nburnin_emcee) for na in naccept]
     return thetas, accept_ratio, blobs
 end
 
