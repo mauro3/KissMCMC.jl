@@ -103,9 +103,9 @@ for dimensions=1:2
             @time thetas, accept_ratio = metropolis(logpdf, sample_prop_normal, 0.5, niter=n)
             test_mean_std(sa, thetas)
 
-            emcee(logpdf, (0.5, 0.1), niter=10, nchains=10);
+            emcee(logpdf, (0.5, 0.1), niter=100, nchains=10);
             print("emcee           : ")
-            @time thetas_e, accept_ratio_e = emcee(logpdf, (0.5, 0.1), niter=n÷100, nchains=100);
+            @time thetas_e, accept_ratio_e = emcee(logpdf, (0.5, 0.1), niter=n, nchains=100);
             thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e );
             test_mean_std(sa, thetas_e_)
             thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e, order=true );
@@ -156,8 +156,8 @@ for dimensions=1:2
         end
         # make a "truth" for Rosenbrock
         print("Calculating Rosenbrock standard...")
-        emcee(rosenpdf, ([0.5,0.5], 0.1), niter=10, nchains=10);
-        thetas_e, accept_ratio_e = emcee(rosenpdf, ([1.0,1.0], 0.1), niter=n÷10, nchains=100);
+        emcee(rosenpdf, ([0.5,0.5], 0.1), niter=100, nchains=10);
+        thetas_e, accept_ratio_e = emcee(rosenpdf, ([1.0,1.0], 0.1), niter=n, nchains=100);
         thetas_rosen, accept_ratio_e = squash_chains(thetas_e, accept_ratio_e );
         thetas_rosen = thetas_rosen[:,1:1000:end]
         println("done.")
@@ -201,9 +201,9 @@ for dimensions=1:2
             @time thetas, accept_ratio = metropolis(logpdf, sample_prop_normal2, [0.5, 0.5], niter=n)
             test_mean_std(sa2, thetas, diff)
 
-            emcee(logpdf, ([0.5,0.5], 0.1), niter=10, nchains=10);
+            emcee(logpdf, ([0.5,0.5], 0.1), niter=100, nchains=10);
             print("emcee           : ")
-            @time thetas_e, accept_ratio_e = emcee(logpdf, ([0.5,0.5], 0.1), niter=n÷100, nchains=100);
+            @time thetas_e, accept_ratio_e = emcee(logpdf, ([0.5,0.5], 0.1), niter=n, nchains=100);
             thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e );
             test_mean_std(sa2, thetas_e_, diff)
             thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e, order=true);
@@ -244,8 +244,8 @@ for dimensions=1:2
                 test_mean_std(sa2, thetasp_, diff)
 
                 print("emceep          : ")
-                emceep(logpdf, ([0.5, 0.5], 0.1), niter=10, nchains=10);
-                @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷nchains÷5, nchains=nchains);
+                emceep(logpdf, ([0.5, 0.5], 0.1), niter=100, nchains=10);
+                @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷5, nchains=nchains);
                 thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep );
                 test_mean_std(sa2, thetas_ep_, diff)
                 thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep, order=true );
