@@ -34,7 +34,7 @@ Input:
 Optional keyword input:
 
 - niter -- number of steps to take (10^5)
-- nburnin -- number of initial steps discarded, aka burn-in (niter/10)
+- nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true (default) (for log-likelihoods) or false
 
@@ -49,7 +49,7 @@ Output:
 """
 function metropolisp(pdf, sample_ppdf, theta0;
                      niter=10^5,
-                     nburnin=niter÷10,
+                     nburnin=niter÷3,
                      nchains=nothing,
                      nthin=1,
                      logpdf=true,
@@ -148,7 +148,7 @@ Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 """
 function emceep(pdf, theta0;
                 nchains=10^2,
-                niter=10^4,
+                niter=10^5,
                 nburnin=niter÷3,
                 logpdf=true,
                 nthin=1,

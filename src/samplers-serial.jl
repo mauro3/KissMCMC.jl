@@ -151,7 +151,7 @@ If nchains==0 then assume that this MCMC cannot handle several chains.
 """
 function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!; make_SharedArray=false)
 
-    ntries = 100 # how many tries to find a IC with nonzero density
+    ntries = max(100,nburnin÷100) # how many tries per chain to find a IC with nonzero density
 
     pdftype = logpdf ? LogPDF() : NonLogPDF()
     pdf = hasblob ? pdf_ : theta -> (pdf_(theta), nothing)
@@ -197,7 +197,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
             for i=1:nchains
                 j = 0
                 for j=1:ntries
-                    tmp = theta0[1] + rand(npara).*radius
+                    tmp = theta0[1] + randn(npara).*radius
                     p0, blob0 = pdf(tmp)
                     if !comp2zero_nan(p0,pdftype)
                         push!(theta0s, tmp)
@@ -257,7 +257,6 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     else
         # Initialize output storage
         thetas = _make_storage(theta0s[1], niter, nburnin, nthin, nchains)
-        @show nchains
         blobs = blob_reduce!(blob0s[1], niter, nburnin, nthin, nchains)
 
         if make_SharedArray
@@ -322,13 +321,14 @@ Input:
 Optional keyword input:
 
 - niter -- number of steps to take (10^5)
-- nburnin -- number of initial steps discarded, aka burn-in (niter/10)
+- nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
 - blob_reduce! -- a function which updates the stored-blob with a
                      new blob, eg. to accommodate calculations made
                      with OnlineStats.jl. See below section.
+- use_progress_meter=true : whether to show a progress meter
 
 Output:
 
@@ -351,11 +351,12 @@ is the chain number, if applicable.
 """
 function metropolis(pdf, sample_ppdf, theta0;
                     niter=10^5,
-                    nburnin=niter÷10,
+                    nburnin=niter÷3,
                     logpdf=true,
                     nthin=1,
                     hasblob=false,
                     blob_reduce! = default_blob_reduce!,
+                    use_progress_meter=true,
                     )
     if !hasblob
         blob_reduce! = default_blob_reduce!
@@ -365,7 +366,7 @@ function metropolis(pdf, sample_ppdf, theta0;
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
 
-    prog = Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis: ", 25)
+    prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
     _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog)
@@ -387,7 +388,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
             naccept += 1
         end
         if rem(n,nthin)==0
-            ProgressMeter.next!(prog; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
+            prog!=nothing && ProgressMeter.next!(prog; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
             if n>0
                 _setindex!(thetas, theta0, ni)
                 blob_reduce!(blobs, blob0, ni)
@@ -440,6 +441,7 @@ Optional key-word input:
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
+- use_progress_meter=true : whether to show a progress meter
 
 Output:
 
@@ -462,6 +464,7 @@ function emcee(pdf, theta0;
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
                hasblob=false,
                blob_reduce! =default_blob_reduce!, # note the space after `!`
+               use_progress_meter=true
                )
     if !hasblob
         blob_reduce! = default_blob_reduce!
@@ -473,7 +476,7 @@ function emcee(pdf, theta0;
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
         _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
     # initialize progress meter (type-unstable)
-    prog = Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, nchains=$nchains: ", 25)
+    prog = use_progress_meter ? Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
     _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
 end
@@ -523,10 +526,11 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
         macc = mean(naccept)
         sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
         outl = sum(abs.(naccept.-macc).>2*sacc)
-        ProgressMeter.next!(prog; showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
-                                                (:accept_ratio_std, signif(sacc/nn,3)),
-                                                (:accept_ratio_outliers, outl),
-                                                (:burnin_phase, n<=0)])
+        prog!=nothing && ProgressMeter.next!(prog;
+                                             showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
+                                                           (:accept_ratio_std, signif(sacc/nn,3)),
+                                                           (:accept_ratio_outliers, outl),
+                                                           (:burnin_phase, n<=0)])
         nn +=1
     end # for n=(1-nburnin_emcee):(niter_emcee-nburnin_emcee)
 
