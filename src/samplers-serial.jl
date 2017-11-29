@@ -466,6 +466,7 @@ function emcee(pdf, theta0;
                blob_reduce! =default_blob_reduce!, # note the space after `!`
                use_progress_meter=true
                )
+    @assert a_scale>1
     if !hasblob
         blob_reduce! = default_blob_reduce!
     end
