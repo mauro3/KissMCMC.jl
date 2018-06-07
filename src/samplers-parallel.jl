@@ -45,7 +45,7 @@ Output:
   - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
-
+- logposterior: the value of the log-posterior for each sample
 """
 function metropolisp(pdf, sample_ppdf, theta0;
                      niter=10^5,
@@ -60,17 +60,17 @@ function metropolisp(pdf, sample_ppdf, theta0;
         warn("nchains keyword not supported")
     end
     # intialize
-    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
+    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
     naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
     ni = SharedArray{Int}(nchains, init = S->S[:]=1)
 
     # run
     _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
-                  naccept, ni, blob_reduce!)
+                  naccept, ni, blob_reduce!, logposts)
 end
 function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nchains, nthin, pdftype,
-                       naccept, ni, blob_reduce!)
+                       naccept, ni, blob_reduce!, logposts)
     N = length(theta0s[1])
     @sync @parallel for nc=1:nchains
         @inbounds for n=(1-nburnin):(niter-nburnin)
@@ -89,12 +89,13 @@ function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, ni
             if n>0 && rem(n,nthin)==0
                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
                 blob_reduce!(blobs, blob0s[nc], ni[nc], nc)
+                logposts[ni] = p0s[nc]
                 ni[nc] +=1
             end
         end
     end
     accept_ratio = [na/(niter-nburnin) for na in naccept]
-    return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs)
+    return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs), logposts
 end
 
 immutable IsScalar end
@@ -141,6 +142,7 @@ Output:
   - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- logposterior: the value of the log-posterior for each sample
 
 Note: use `squash_chains` to concatenate all chains into one chain.
 
@@ -159,7 +161,7 @@ function emceep(pdf, theta0;
     niter_emcee = niter ÷ nchains
     nburnin_emcee = nburnin ÷ nchains
 
-    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
+    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
     nchains<2 && error("Need nchains>1")
 
@@ -190,12 +192,12 @@ function emceep(pdf, theta0;
     # do the MCMC
     _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf_,
                      niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale,
-                     naccept, ni, blob_reduce!)
+                     naccept, ni, blob_reduce!, logposts)
 end
 
 function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs, pdf,
                           niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale,
-                          naccept, ni, blob_reduce!)
+                          naccept, ni, blob_reduce!, logposts)
     N = size(theta0s,1) # number of parameters
     # the two sets
     nchains12 = UnitRange{Int}[1:nchains÷2, nchains÷2+1:nchains]
@@ -235,6 +237,7 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
                         _setindex!(thetas, theta0s[:,nc], ni[nc], nc)
                         blob_reduce!(blobs, blob0s[:,nc], ni[nc], nc)
                     end
+                    logposts[ni[nc], nc] = p0s[nc]
                     ni[nc] +=1
                 end
              end # for nc in ncs
@@ -243,7 +246,7 @@ function _parallel_emcee!(p0s, theta0s, blob0s, theta1, isscalar, thetas, blobs,
 
     accept_ratio = [na/(niter_emcee-nburnin_emcee) for na in naccept]
 
-    return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs)
+    return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs), logposts
 end
 
 

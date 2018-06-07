@@ -100,13 +100,20 @@ for dimensions=1:2
             # # warmup
             metropolis(logpdf, sample_prop_normal, 0.5, niter=10, logpdf=true)
             print("Metropolis     : ")
-            @time thetas, accept_ratio = metropolis(logpdf, sample_prop_normal, 0.5, niter=n)
+            @time thetas, accept_ratio, blobs, logposts = metropolis(logpdf, sample_prop_normal, 0.5, niter=n)
             test_mean_std(sa, thetas)
+            @test blobs==nothing
+            @test length(logposts)==length(thetas)
 
             emcee(logpdf, (0.5, 0.1), niter=100, nchains=10);
             print("emcee           : ")
-            @time thetas_e, accept_ratio_e = emcee(logpdf, (0.5, 0.1), niter=n, nchains=100);
-            thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e );
+            @time thetas_e, accept_ratio_e, blobs, logposts_e = emcee(logpdf, (0.5, 0.1), niter=n, nchains=100);
+            @test blobs==nothing
+
+            thetas_e_, accept_ratio_e_, blobs, logposts_e_ = squash_chains(thetas_e, accept_ratio_e, blobs, logposts_e );
+            @test blobs==nothing
+            @test length(logposts_e_)==length(thetas_e_)
+
             test_mean_std(sa, thetas_e_)
             thetas_e_, accept_ratio_e_ = squash_chains(thetas_e, accept_ratio_e, order=true );
             test_mean_std(sa, thetas_e_)

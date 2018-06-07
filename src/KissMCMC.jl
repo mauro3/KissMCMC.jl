@@ -54,7 +54,9 @@ end
 
 """
 Calculate the mode of samples, i.e. where the pdf should be maximal.
-This may not be the best way.
+
+
+Note: This may not be the best way.  In fact it is dog slow for large data.
 """
 function modehist(samples::AbstractVector, nbins=length(samples)÷10)
     hh = fit(Histogram, samples, nbins=nbins, closed=:right)
@@ -64,6 +66,7 @@ function modehist(samples::AbstractVector, nbins=length(samples)÷10)
 end
 
 function modehist(samples::AbstractMatrix, nbins=size(samples,2)÷10)
+    error("This does not work...")
     modes = Float64[]
     for row in 1:size(samples,1)
         push!(modes, modehist(view(samples, row, 1:size(samples,2)), nbins))

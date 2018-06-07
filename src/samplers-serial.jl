@@ -252,11 +252,13 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
     if nchains==0
         # Initialize output storage
         thetas = _make_storage(theta0, niter, nburnin, nthin)
+        logposts = _make_storage(1.0, niter, nburnin, nthin)
         blobs = blob_reduce!(blob0, niter, nburnin, nthin)
-        return pdf, p0, theta0, blob0, thetas, blobs, nchains, pdftype
+        return pdf, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts
     else
         # Initialize output storage
         thetas = _make_storage(theta0s[1], niter, nburnin, nthin, nchains)
+        logposts = _make_storage(1.0, niter, nburnin, nthin, nchains)
         blobs = blob_reduce!(blob0s[1], niter, nburnin, nthin, nchains)
 
         if make_SharedArray
@@ -277,7 +279,7 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
             end
 
         end
-        return pdf, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype
+        return pdf, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts
     end
 end
 
@@ -291,9 +293,12 @@ default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int, nchains::In
 default_blob_reduce!(stored_blob, new_blob, ni::Int) = _setindex!(stored_blob, new_blob, ni)
 default_blob_reduce!(stored_blob, new_blob, ni::Int, nc::Int) = _setindex!(stored_blob, new_blob, ni, nc)
 # squash chains
-default_blob_reduce!{T}(blobs::Array{T,3}, chains2keep) = blobs[:,:,chaines2keep]
-default_blob_reduce!{T}(blobs::Array{T,2}, chains2keep) = blobs[:,chaines2keep]
-default_blob_reduce!{T}(blobs::Array{T,1}, chains2keep) = blobs[chaines2keep]
+function default_blob_reduce!{T}(blobs::Array{T,3}, chains2keep)
+    t = blobs[:,:,chains2keep]
+    reshape(t, (size(t,1), size(t,2)*size(t,3)) )
+end
+default_blob_reduce!{T}(blobs::Array{T,2}, chains2keep) = blobs[:,chains2keep][:]
+default_blob_reduce!{T}(blobs::Array{T,1}, chains2keep) = blobs[chains2keep]
 
 ## The serial MCMC samplers
 ###########################
@@ -337,6 +342,7 @@ Output:
   - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- logposterior: the value of the log-posterior for each sample
 
 ## Blobs and reduction:
 
@@ -363,15 +369,15 @@ function metropolis(pdf, sample_ppdf, theta0;
     end
     # initialize
     nchains = 0
-    pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype =
+    pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
 
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
-    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog)
+    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
 end
-function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog)
+function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
     naccept = 0
     ni = 1
     rng = (1-nburnin):(niter-nburnin)
@@ -392,6 +398,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
             if n>0
                 _setindex!(thetas, theta0, ni)
                 blob_reduce!(blobs, blob0, ni)
+                logposts[ni] = p0
                 ni +=1
             end
         end
@@ -402,7 +409,7 @@ function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter,
         end
     end
     accept_ratio = naccept/(niter-nburnin)
-    return thetas, accept_ratio, blobs
+    return thetas, accept_ratio, blobs, logposts
 end
 
 ## TODO:
@@ -415,7 +422,7 @@ end
 # https://github.com/dfm/emcee
 
 """
-The emcee Metropolis sampler: https://github.com/dfm/emcee
+The emcee MCMC sampler: https://github.com/dfm/emcee
 
 Input:
 
@@ -450,6 +457,7 @@ Output:
   - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- logposterior: the value of the log-posterior for each sample
 
 Note: use `squash_chains` to concatenate all chains into one chain.
 
@@ -474,15 +482,15 @@ function emcee(pdf, theta0;
     nburnin_emcee = nburnin ÷ nchains
 
     # initialize
-    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype =
+    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
     # initialize progress meter (type-unstable)
     prog = use_progress_meter ? Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
-    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
+    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
 end
 const debug = Int[]
-function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog)
+function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
     ni = ones(Int, nchains)
@@ -517,6 +525,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
             if  n>0 && rem(n,nthin)==0
                 _setindex!(thetas, theta0s[nc], ni[nc], nc)
                 blob_reduce!(blobs, blob0s[nc], ni[nc], nc)
+                logposts[ni[nc], nc] = p0s[nc]
                 ni[nc] +=1
             end
         end # for nc =1:nchains
@@ -536,7 +545,7 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
     end # for n=(1-nburnin_emcee):(niter_emcee-nburnin_emcee)
 
     accept_ratio = [na/(niter_emcee-nburnin_emcee) for na in naccept]
-    return thetas, accept_ratio, blobs
+    return thetas, accept_ratio, blobs, logposts
 end
 
 """
@@ -554,10 +563,11 @@ drop more chains.
 
 Returns:
 - theta
-- mean(accept_ratio[chaines2keep])
+- mean(accept_ratio[chains2keep])
 - blobs
+- log-posteriors
 """
-function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing; drop_low_accept_ratio=false,
+function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing; drop_low_accept_ratio=false,
                                                                  drop_fact=1,
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  verbose=true,
@@ -565,7 +575,7 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
                                                                  )
     nchains=length(accept_ratio)
     if drop_low_accept_ratio
-        chaines2keep = Int[]
+        chains2keep = Int[]
         # this is a bit of a hack, but emcee seems to sometimes have
         # chains which are stuck in oblivion.  These have a very low
         # acceptance ratio, thus filter them out.
@@ -576,30 +586,38 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
                 verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
                 continue
             end
-            push!(chaines2keep, nc)
+            push!(chains2keep, nc)
         end
     else
-        chaines2keep = collect(1:nchains) # collect to make chaines2keep::Vector{Int}
+        chains2keep = collect(1:nchains) # collect to make chains2keep::Vector{Int}
     end
 
     # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
-        t = thetas[:,:,chaines2keep]
+        t = thetas[:,:,chains2keep]
         t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
     else
-        t = thetas[:,chaines2keep][:]
+        t = thetas[:,chains2keep][:]
+    end
+    if logposts==nothing
+        l = nothing
+    else
+        l = logposts[:,chains2keep][:]
     end
     if blobs==nothing
         b = nothing
     else
-        b = blob_reduce!(blobs, chaines2keep)
+        b = blob_reduce!(blobs, chains2keep)
     end
     if order # order such that early samples are early in thetas
-        nc = length(chaines2keep)
+        nc = length(chains2keep)
         ns = size(thetas,1)
         perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
         if blobs!=nothing
             b = b[perm]
+        end
+        if logposts!=nothing
+            l = l[perm]
         end
         if ndims(thetas)==3
             t = t[:,perm]
@@ -607,7 +625,7 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
             t = t[perm]
         end
     end
-    return t, mean(accept_ratio[chaines2keep]), b
+    return t, mean(accept_ratio[chains2keep]), b, l
 end
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
