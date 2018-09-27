@@ -453,8 +453,8 @@ Optional key-word input:
 Output:
 
 - samples:
-  - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
-  - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
+  - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin, nchains)
+  - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin, nchains)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 - logposterior: the value of the log-posterior for each sample
@@ -462,6 +462,10 @@ Output:
 Note: use `squash_chains` to concatenate all chains into one chain.
 
 Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
+
+Example
+
+    thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
 """
 function emcee(pdf, theta0;
                nchains=10^2,
@@ -489,7 +493,7 @@ function emcee(pdf, theta0;
     # do the MCMC
     _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
 end
-const debug = Int[]
+
 function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
@@ -502,9 +506,6 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
             # draw a random other chain
             no = rand(1:nchains-1)
             no = no>=nc ? no+1 : no # shift by one
-            if nc==9
-                push!(debug, no)
-            end
             # sample g (eq. 10)
             z = sample_g(a_scale)
 
@@ -548,27 +549,70 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
     return thetas, accept_ratio, blobs, logposts
 end
 
+"g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
+g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
+
+"Inverse cdf of g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
+cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
+
+"Sample from g using inverse transform sampling.  a=2.0 is recommended."
+sample_g(a) = cdf_g_inv(rand(), a)
+
 """
-    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing; drop_low_accept_ratio=false,
+    evaluate_convergence(thetas; indices=1:size(thetas)[1])
+
+Evaluates:
+- R̂ (potential scale reduction): should be <1.05
+- total effective sample size of all chains combined, and
+- the average thinning factor
+
+See Gelman etal 2014, page 281-287
+
+Example
+
+    thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+    Rhat, sample_size, nthin = evaluate_convergence(thetas)
+"""
+function evaluate_convergence(thetas; indices=1:size(thetas)[1])
+
+    Rs = Float64[]
+    sample_size = Float64[]
+    nchains = size(thetas)[3]
+    split = size(thetas)[2]÷2
+    for i in indices
+        chains = vcat([thetas[i,1:split,n] for n=1:nchains], [thetas[i,split+1:2*split,n] for n=1:nchains])
+        push!(Rs, potential_scale_reduction(chains...))
+        push!(sample_size, sum(effective_sample_size.(chains)))
+    end
+    return Rs, sample_size, round(Int, size(thetas)[2]*size(thetas)[3]/mean(sample_size))
+end
+
+
+
+"""
+    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing;
+                                                                 drop_low_accept_ratio=false,
                                                                  drop_fact=1,
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  verbose=true,
                                                                  order=false
                                                                  )
-Puts the samples of all chains into one vector.
+Puts the samples of all chains into one vector.  Note that afterwards Rhat cannot
+be computed anymore.
 
-Can drop chains which have a low accept ratio (this can happen with
-emcee), by setting drop_low_accept_ratio.  drop_fact -> decrease to
-drop more chains.
+This can also drop chains which have a low accept ratio (this can happen with
+emcee), by setting drop_low_accept_ratio (Although whether it is wise to
+do so is another question).  drop_fact -> increase to drop more chains.
 
 Returns:
 - theta
 - mean(accept_ratio[chains2keep])
 - blobs
 - log-posteriors
+- reshape_size: reshape(thetas_out, reshape_size) will put it back into the chains.
 """
 function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing; drop_low_accept_ratio=false,
-                                                                 drop_fact=1,
+                                                                 drop_fact=2,
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  verbose=true,
                                                                  order=false
@@ -595,9 +639,12 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
     # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
         t = thetas[:,:,chains2keep]
+        reshape_size = size(t)
         t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
     else
-        t = thetas[:,chains2keep][:]
+        t = thetas[:,chains2keep]
+        reshape_size = size(t)
+        t = t[:]
     end
     if logposts==nothing
         l = nothing
@@ -625,14 +672,5 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
             t = t[perm]
         end
     end
-    return t, mean(accept_ratio[chains2keep]), b, l
+    return t, mean(accept_ratio[chains2keep]), b, l, reshape_size
 end
-
-"g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
-g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
-
-"Inverse cdf of g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
-cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
-
-"Sample from g using inverse transform sampling.  a=2.0 is recommended."
-sample_g(a) = cdf_g_inv(rand(), a)
