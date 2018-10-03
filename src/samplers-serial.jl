@@ -574,7 +574,6 @@ Example
     Rhat, sample_size, nthin = evaluate_convergence(thetas)
 """
 function evaluate_convergence(thetas; indices=1:size(thetas)[1])
-
     Rs = Float64[]
     sample_size = Float64[]
     nchains = size(thetas)[3]
@@ -584,7 +583,8 @@ function evaluate_convergence(thetas; indices=1:size(thetas)[1])
         push!(Rs, potential_scale_reduction(chains...))
         push!(sample_size, sum(effective_sample_size.(chains)))
     end
-    return Rs, sample_size, round(Int, size(thetas)[2]*size(thetas)[3]/mean(sample_size))
+    nthin = size(thetas)[2]*size(thetas)[3]/mean(sample_size)
+    return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
 end
 
 
@@ -609,7 +609,7 @@ Returns:
 - mean(accept_ratio[chains2keep])
 - blobs
 - log-posteriors
-- reshape_size: reshape(thetas_out, reshape_size) will put it back into the chains.
+- reshape_revert: reshape(thetas_out, reshape_revert...) will put it back into the chains.
 """
 function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing; drop_low_accept_ratio=false,
                                                                  drop_fact=2,
@@ -639,11 +639,11 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
     # TODO: below creates too many temporary arrays
     if ndims(thetas)==3
         t = thetas[:,:,chains2keep]
-        reshape_size = size(t)
+        reshape_revert = size(t)
         t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
     else
         t = thetas[:,chains2keep]
-        reshape_size = size(t)
+        reshape_revert = size(t)
         t = t[:]
     end
     if logposts==nothing
@@ -672,5 +672,5 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
             t = t[perm]
         end
     end
-    return t, mean(accept_ratio[chains2keep]), b, l, reshape_size
+    return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
 end
