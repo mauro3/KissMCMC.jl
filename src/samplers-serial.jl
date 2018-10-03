@@ -357,7 +357,7 @@ is the chain number, if applicable.
 """
 function metropolis(pdf, sample_ppdf, theta0;
                     niter=10^5,
-                    nburnin=niter÷3,
+                    nburnin=niter÷2,
                     logpdf=true,
                     nthin=1,
                     hasblob=false,
@@ -470,7 +470,7 @@ Example
 function emcee(pdf, theta0;
                nchains=10^2,
                niter=10^5,
-               nburnin=niter÷3,
+               nburnin=niter÷2,
                logpdf=true,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
