@@ -53,12 +53,13 @@ end
 ######
 
 "Summary statistics of a run."
-function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)])
+function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i" for i=1:size(thetas,1)],
+                       Rhat=nothing, mode=nothing)
     nt = size(thetas,1)
     ns = size(thetas,2)
     if length(theta_true)>0
-        cols = Any[[], [],[],[],[],[]]
-        header = [:var, :err, :median, :mean, :mode, :std]
+        cols = Rhat==nothing ? Any[[], [],[],[],[],[]] : Any[[], [],[],[],[],[],[]]
+        header = Rhat==nothing ? [:var, :err, :median, :mean, :mode, :std] : [:var, :err, :median, :mean, :mode, :std, :Rhat]
 
         for i=1:nt
             push!(cols[1], Symbol(names[i]))
@@ -67,18 +68,20 @@ function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i"
             push!(cols[2], abs(t-m))
             push!(cols[3], median(view(thetas,i,1:ns)))
             push!(cols[4], mean(view(thetas,i,1:ns)))
-            push!(cols[5], modehist(view(thetas,i,1:ns)))
+            push!(cols[5], mod==nothing? nothing : mode[i])
             push!(cols[6], std(view(thetas,i,1:ns)))
+            Rhat!=nothing && push!(cols[7], Rhat[i])
         end
     else
-        cols = Any[[], [],[],[],[]]
-        header = [:var, :median, :mean, :mode, :std]
+        cols = Rhat==nothing ? Any[[], [],[],[],[]] : Any[[], [],[],[],[], []]
+        header = Rhat==nothing ? [:var, :median, :mean, :mode, :std] : [:var, :median, :mean, :mode, :std, :Rhat]
         for i=1:nt
             push!(cols[1], Symbol(names[i]))
             push!(cols[2], median(view(thetas,i,1:ns)))
             push!(cols[3], mean(view(thetas,i,1:ns)))
-            push!(cols[4], modehist(view(thetas,i,1:ns)))
+            push!(cols[4], mode==nothing? nothing : mode[i])
             push!(cols[5], std(view(thetas,i,1:ns)))
+            Rhat!=nothing && push!(cols[6], Rhat[i])
         end
 
     end
@@ -86,13 +89,13 @@ function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i"
 end
 
 "Print result summary"
-function print_results(thetas::Matrix, accept_ratio; theta_true=similar(thetas,0),
+function print_results(thetas::Matrix, accept_ratio, Rhat=nothing, mode=nothing; theta_true=similar(thetas,0),
                        names=["$i" for i=1:size(thetas,1)],
                        maxvar=45,
                        title="")
     println(title)
     println("Ratio of accepted/total steps: $accept_ratio\n")
-    out = summarize_run(thetas, theta_true=theta_true, names=names)
+    out = summarize_run(thetas, theta_true=theta_true, names=names, Rhat=Rhat)
     show(out[1:min(size(out,1),maxvar),:])
     nothing
 end

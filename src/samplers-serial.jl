@@ -455,8 +455,8 @@ Output:
 - samples:
   - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin, nchains)
   - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin, nchains)
-- blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- blobs: anything else that the pdf-function returns as second argument
 - logposterior: the value of the log-posterior for each sample
 
 Note: use `squash_chains` to concatenate all chains into one chain.
@@ -590,7 +590,7 @@ end
 
 
 """
-    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing;
+    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
                                                                  drop_low_accept_ratio=false,
                                                                  drop_fact=1,
                                                                  blob_reduce! =default_blob_reduce!,
@@ -611,7 +611,8 @@ Returns:
 - log-posteriors
 - reshape_revert: reshape(thetas_out, reshape_revert...) will put it back into the chains.
 """
-function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing; drop_low_accept_ratio=false,
+function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
+                                                                 drop_low_accept_ratio=false,
                                                                  drop_fact=2,
                                                                  blob_reduce! =default_blob_reduce!,
                                                                  verbose=true,
@@ -671,6 +672,7 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
         else
             t = t[perm]
         end
+        reshape_revert = nothing # not possible to reorder
     end
     return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
 end
