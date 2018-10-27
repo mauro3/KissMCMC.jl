@@ -488,6 +488,8 @@ function emcee(pdf, theta0;
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+    @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
+
     # initialize progress meter (type-unstable)
     prog = use_progress_meter ? Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC

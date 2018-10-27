@@ -43,8 +43,8 @@ Output:
 - samples:
   - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
   - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
-- blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- blobs: anything else that the pdf-function returns as second argument
 - logposterior: the value of the log-posterior for each sample
 """
 function metropolisp(pdf, sample_ppdf, theta0;
@@ -140,8 +140,8 @@ Output:
 - samples:
   - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
   - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
-- blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
+- blobs: anything else that the pdf-function returns as second argument
 - logposterior: the value of the log-posterior for each sample
 
 Note: use `squash_chains` to concatenate all chains into one chain.
@@ -163,7 +163,7 @@ function emceep(pdf, theta0;
 
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
-    nchains<2 && error("Need nchains>1")
+    @assert nchains>=2*(length(theta0s[1])+2) "Use more chains: at least 2*(DOF+2), but better many more!"
 
     # make theta0s blob0s into SharedArray
     if eltype(theta0s)<:Number
