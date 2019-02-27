@@ -678,3 +678,58 @@ function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=noth
     end
     return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
 end
+
+
+####################
+"""
+         retrace_samples(pdf, thetas_in;
+                         logpdf=true,
+                         hasblob=false,
+                         blob_reduce! = default_blob_reduce!,
+                         use_progress_meter=true)
+
+This function allows to re-run the pdf for some, given thetas (`thetas_in`).  This is probably
+a bit niche, but hey.
+
+This I use when only sampling the prior but then want to get some function-blob evaluations.
+That way the evaluation of an expensive forward function can be avoided.
+"""
+function retrace_samples(pdf, thetas_in;
+                         logpdf=true,
+                         hasblob=false,
+                         blob_reduce! = default_blob_reduce!,
+                         use_progress_meter=true,
+                         )
+    if !hasblob
+        blob_reduce! = default_blob_reduce!
+    end
+    # initialize
+    nchains = 0
+    niter = size(thetas_in,2)
+    nburnin = 0
+    nthin = 1
+    pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
+        _initialize(pdf, thetas_in[:,1], niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+
+    prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Retracing samples, niter=$niter: ", 25) : nothing
+
+    # run
+    _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf_, niter,
+                      nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+end
+function _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf, niter,
+                           nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+    @inbounds for ni=1:size(thetas_in,2)
+        theta = thetas_in[:,ni]
+        # take a step:
+        p, blob = pdf(theta)
+
+        _setindex!(thetas, theta, ni)
+        blob_reduce!(blobs, blob, ni)
+        logposts[ni] = p
+
+        prog!=nothing && ProgressMeter.next!(prog)
+    end
+    accept_ratio = -1
+    return thetas, accept_ratio, blobs, logposts
+end
