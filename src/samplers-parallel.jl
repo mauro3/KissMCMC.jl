@@ -134,6 +134,8 @@ Optional key-word input:
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
+- ball_radius_halfing_steps=7 : if no initial theta can be round within the ball, its radius will be halved
+                                and tried again; repeatedly for the specified amount of halfing-steps.
 
 Output:
 
@@ -157,12 +159,14 @@ function emceep(pdf, theta0;
                 a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
                 hasblob=false,
                 blob_reduce! = default_blob_reduce!,
+                ball_radius_halfing_steps=7
                 )
     niter_emcee = niter ÷ nchains
     nburnin_emcee = nburnin ÷ nchains
 
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!;
+                    make_SharedArray=true, ball_radius_halfing_steps=ball_radius_halfing_steps)
     @assert nchains>=2*(length(theta0s[1])+2) "Use more chains: at least 2*(DOF+2), but better many more!"
 
     # make theta0s blob0s into SharedArray

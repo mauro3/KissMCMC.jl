@@ -149,7 +149,8 @@ allow for all the different input combinations.
 
 If nchains==0 then assume that this MCMC cannot handle several chains.
 """
-function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!; make_SharedArray=false)
+function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!;
+                     make_SharedArray=false, ball_radius_halfing_steps=7)
 
     ntries = max(100,nburnin÷100) # how many tries per chain to find a IC with nonzero density
 
@@ -173,40 +174,49 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasbl
         blob0s = typeof(blob0)[]
         sizehint!(blob0s, nchains)
 
-
         if isa(theta0[1], Number)
-            radius = theta0[2]
             for i=1:nchains
-                j = 0
-                for j=1:ntries
-                    tmp = theta0[1] + rand()*radius
-                    p0, blob0 = pdf(tmp)
-                    if !comp2zero_nan(p0,pdftype)
-                        push!(theta0s, tmp)
-                        push!(blob0s, blob0)
-                        push!(p0s, p0)
-                        break
+                for k=1:ball_radius_halfing_steps
+                    j = 0
+                    radius = theta0[2] / 2^(k-1)
+                    for j=1:ntries
+                        tmp = theta0[1] + rand()*radius
+                        p0, blob0 = pdf(tmp)
+                        if !comp2zero_nan(p0,pdftype)
+                            push!(theta0s, tmp)
+                            push!(blob0s, blob0)
+                            push!(p0s, p0)
+                            break
+                        end
                     end
+                    length(theta0s)==i && break # found a suitable theta for this chain
+                    j==ntries && k==ball_radius_halfing_steps &&
+                        error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
                 end
-                j==ntries && error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
             end
+
         else # assume theta0[1] is a Vector of numbers
             npara = length(theta0[1])
             radius = isa(theta0[2], Number) ? theta0[2]*ones(npara) : theta0[2]
             @assert length(radius)==npara
             for i=1:nchains
-                j = 0
-                for j=1:ntries
-                    tmp = theta0[1] + randn(npara).*radius
-                    p0, blob0 = pdf(tmp)
-                    if !comp2zero_nan(p0,pdftype)
-                        push!(theta0s, tmp)
-                        push!(blob0s, blob0)
-                        push!(p0s, p0)
-                        break
+                for k=1:ball_radius_halfing_steps
+                    j = 0
+                    radius ./= 2^(k-1)
+                    for j=1:ntries
+                        tmp = theta0[1] + randn(npara).*radius
+                        p0, blob0 = pdf(tmp)
+                        if !comp2zero_nan(p0,pdftype)
+                            push!(theta0s, tmp)
+                            push!(blob0s, blob0)
+                            push!(p0s, p0)
+                            break
+                        end
                     end
+                    length(theta0s)==i && break # found suitable thetas for this chain
+                    j==ntries && k==ball_radius_halfing_steps &&
+                        error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
                 end
-                j==ntries && error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
             end
         end
     elseif isa(theta0, AbstractVector) # Case: all theta0 are given
@@ -449,6 +459,8 @@ Optional key-word input:
 - logpdf -- either true  (default) (for log-likelihoods) or false
 - hasblob -- set to true if pdf also returns a blob
 - use_progress_meter=true : whether to show a progress meter
+- ball_radius_halfing_steps=7 : if no initial theta can be round within the ball, its radius will be halved
+                                and tried again; repeatedly for the specified amount of halfing-steps.
 
 Output:
 
@@ -476,7 +488,8 @@ function emcee(pdf, theta0;
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
                hasblob=false,
                blob_reduce! =default_blob_reduce!, # note the space after `!`
-               use_progress_meter=true
+               use_progress_meter=true,
+               ball_radius_halfing_steps=7
                )
     @assert a_scale>1
     if !hasblob
@@ -487,7 +500,8 @@ function emcee(pdf, theta0;
 
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!;
+                    make_SharedArray=false, ball_radius_halfing_steps=ball_radius_halfing_steps)
     @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
     # initialize progress meter (type-unstable)
