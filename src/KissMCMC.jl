@@ -21,6 +21,9 @@ if VERSION>=v"0.5-"
 end
 
 
+hasblob(pdf, theta) = length(pdf(theta))==2
+hasblob(pdf, theta::Union{Tuple,AbstractVector{<:AbstractVector}}) = length(pdf(theta[1]))==2
+
 ######
 # Evaluation
 #####

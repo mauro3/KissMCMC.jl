@@ -197,18 +197,18 @@ theta_true = vcat([A, ω, ϕ, sigma_x, sigma_v, sigma_t], ts_measured);  # good 
 theta0 = vcat([2.1, 1.1, 1.1, 0.2, 0.2, 0.05], ts_measured); # decent IC
 
 @time 1
-metropolis(logposterior_blob, sample_ppdf, theta0, niter=2, hasblob=true)
+metropolis(logposterior_blob, sample_ppdf, theta0, niter=2)
 print("Metropolis: ")
 @time thetas_m, accept_ratio_m, blobs_m = metropolis(logposterior_blob, sample_ppdf, theta0,
-                                                     niter=niter, nthin=nthin, nburnin=nburnin, hasblob=true)
+                                                     niter=niter, nthin=nthin, nburnin=nburnin)
 xv_a,xv_b = unpack_blob(blobs_m, ts_pred);
 x_a,v_a = unpack_xv(xv_a);
 print_results(thetas_m, accept_ratio_m, names=varnames, title="Metropolis", theta_true=theta_true)
 
-emcee(logposterior_blob, (theta0, 0.1), niter=10, nchains=2, hasblob=true)
+emcee(logposterior_blob, (theta0, 0.1), niter=10, nchains=2)
 print("emcee:")
 @time thetas_ec, accept_ratio_ec, blobs_ec = emcee(logposterior_blob, (theta0, 0.1),
-                                               niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e, hasblob=true)
+                                               niter=niter_e, nthin=nthin, nchains=nchains, nburnin=nburnin_e)
 # When running this problem with IC far from the maximum, then emcee produces
 thetas_e, accept_ratio_e, blobs_e = squash_chains(thetas_ec, accept_ratio_ec, blobs_ec, drop_low_accept_ratio=true)
 print_results(thetas_e, accept_ratio_e, names=varnames, title="emcee", theta_true=theta_true)

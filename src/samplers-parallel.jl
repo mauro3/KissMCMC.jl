@@ -21,7 +21,7 @@ Input:
          log-pdf.  (The likelihood*prior in a Bayesian setting) Returns
          the density.
 
-         If hasblob==true, then it also returns an arbitrary blob of
+         It can also return an arbitrary blob of
          something.
          `p, blob = pdf(theta)` where `theta` are the parameters.
          Note that blob can use pre-allocated memory as it will be copied
@@ -53,7 +53,6 @@ function metropolisp(pdf, sample_ppdf, theta0;
                      nchains=nothing,
                      nthin=1,
                      logpdf=true,
-                     hasblob=false,
                      blob_reduce! = default_blob_reduce!,
                      )
     if nchains!=nothing
@@ -61,7 +60,7 @@ function metropolisp(pdf, sample_ppdf, theta0;
     end
     # intialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=true)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=true)
     naccept = SharedArray{Int}(nchains, init = S->S[:]=0)
     ni = SharedArray{Int}(nchains, init = S->S[:]=1)
 
@@ -116,7 +115,7 @@ Input:
          log-pdf.  The likelihood*prior in a Bayesian setting.
          `pdf` returns the density.
 
-         If hasblob==true, then it also returns an arbitrary blob of
+         It can also returns an arbitrary blob of
          something.
          `p, blob = pdf(theta)` where `theta` are the parameters.
          Note that blob can use pre-allocated memory as it will be copied
@@ -133,7 +132,6 @@ Optional key-word input:
 - nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
-- hasblob -- set to true if pdf also returns a blob
 - ball_radius_halfing_steps=7 : if no initial theta can be round within the ball, its radius will be halved
                                 and tried again; repeatedly for the specified amount of halfing-steps.
 
@@ -157,7 +155,6 @@ function emceep(pdf, theta0;
                 logpdf=true,
                 nthin=1,
                 a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-                hasblob=false,
                 blob_reduce! = default_blob_reduce!,
                 ball_radius_halfing_steps=7
                 )
@@ -165,7 +162,7 @@ function emceep(pdf, theta0;
     nburnin_emcee = nburnin ÷ nchains
 
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!;
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, blob_reduce!;
                     make_SharedArray=true, ball_radius_halfing_steps=ball_radius_halfing_steps)
     @assert nchains>=2*(length(theta0s[1])+2) "Use more chains: at least 2*(DOF+2), but better many more!"
 

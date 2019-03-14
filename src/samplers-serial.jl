@@ -149,13 +149,13 @@ allow for all the different input combinations.
 
 If nchains==0 then assume that this MCMC cannot handle several chains.
 """
-function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!;
+function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!;
                      make_SharedArray=false, ball_radius_halfing_steps=7)
 
     ntries = max(100,nburnin÷100) # how many tries per chain to find a IC with nonzero density
 
     pdftype = logpdf ? LogPDF() : NonLogPDF()
-    pdf = hasblob ? pdf_ : theta -> (pdf_(theta), nothing)
+    pdf = hasblob(pdf_, theta0) ? pdf_ : theta -> (pdf_(theta), nothing)
 
     # Make initial chain positions and value of blob0 and p0
     if nchains==0 # a single theta is given and no chains are used, i.e. a single chain algo
@@ -323,8 +323,8 @@ Input:
          log-pdf.  (The likelihood*prior in a Bayesian setting) Returns
          the density.
 
-         If hasblob==true, then it also returns an arbitrary blob of
-         something.
+         It can also returns an arbitrary blob of
+         something as second output argument.
          `p, blob = pdf(theta)` where `theta` are the parameters.
          Note that blob can use pre-allocated memory as it will be copied
          (but not deepcopied) before storage.
@@ -339,7 +339,6 @@ Optional keyword input:
 - nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true (default) (for log-likelihoods) or false
-- hasblob -- set to true if pdf also returns a blob
 - blob_reduce! -- a function which updates the stored-blob with a
                      new blob, eg. to accommodate calculations made
                      with OnlineStats.jl. See below section.
@@ -370,17 +369,13 @@ function metropolis(pdf, sample_ppdf, theta0;
                     nburnin=niter÷2,
                     logpdf=true,
                     nthin=1,
-                    hasblob=false,
                     blob_reduce! = default_blob_reduce!,
                     use_progress_meter=true,
                     )
-    if !hasblob
-        blob_reduce! = default_blob_reduce!
-    end
     # initialize
     nchains = 0
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=false)
 
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
@@ -440,7 +435,7 @@ Input:
          log-pdf.  The likelihood*prior in a Bayesian setting.
          `pdf` returns the density.
 
-         If hasblob==true, then it also returns an arbitrary blob of
+         The pdf can also returns an arbitrary blob of
          something.
          `p, blob = pdf(theta)` where `theta` are the parameters.
          Note that blob can use pre-allocated memory as it will be copied
@@ -457,7 +452,6 @@ Optional key-word input:
 - nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - logpdf -- either true  (default) (for log-likelihoods) or false
-- hasblob -- set to true if pdf also returns a blob
 - use_progress_meter=true : whether to show a progress meter
 - ball_radius_halfing_steps=7 : if no initial theta can be round within the ball, its radius will be halved
                                 and tried again; repeatedly for the specified amount of halfing-steps.
@@ -486,21 +480,17 @@ function emcee(pdf, theta0;
                logpdf=true,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-               hasblob=false,
                blob_reduce! =default_blob_reduce!, # note the space after `!`
                use_progress_meter=true,
                ball_radius_halfing_steps=7
                )
     @assert a_scale>1
-    if !hasblob
-        blob_reduce! = default_blob_reduce!
-    end
     niter_emcee = niter ÷ nchains
     nburnin_emcee = nburnin ÷ nchains
 
     # initialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, hasblob, blob_reduce!;
+        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, blob_reduce!;
                     make_SharedArray=false, ball_radius_halfing_steps=ball_radius_halfing_steps)
     @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
@@ -698,7 +688,6 @@ end
 """
          retrace_samples(pdf, thetas_in;
                          logpdf=true,
-                         hasblob=false,
                          blob_reduce! = default_blob_reduce!,
                          use_progress_meter=true)
 
@@ -710,20 +699,16 @@ That way the evaluation of an expensive forward function can be avoided.
 """
 function retrace_samples(pdf, thetas_in;
                          logpdf=true,
-                         hasblob=false,
                          blob_reduce! = default_blob_reduce!,
                          use_progress_meter=true,
                          )
-    if !hasblob
-        blob_reduce! = default_blob_reduce!
-    end
     # initialize
     nchains = 0
     niter = size(thetas_in,2)
     nburnin = 0
     nthin = 1
     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, thetas_in[:,1], niter, nburnin, logpdf, nchains, nthin, hasblob, blob_reduce!, make_SharedArray=false)
+        _initialize(pdf, thetas_in[:,1], niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=false)
 
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Retracing samples, niter=$niter: ", 25) : nothing
 
