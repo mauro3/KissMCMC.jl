@@ -11,7 +11,7 @@ a few simple MCMC samplers (and also a few other samplers).
 ```julia
 using KissMCMC
 # the distribution to sample from,
-logpdf{T}(x::T) = x<0 ? -convert(T,Inf) : -x
+logpdf(x::T) where {T} = x<0 ? -convert(T,Inf) : -x
 # initial point of chain
 theta0 = 0.5
 

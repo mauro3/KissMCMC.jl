@@ -92,14 +92,14 @@ end
 #######
 
 "Types used for dispatch depending on whether using a log-pdf or not."
-@compat abstract type PDFType end
-immutable LogPDF<:PDFType end
+abstract type PDFType end
+struct LogPDF<:PDFType end
 comp2zero_nan(p, ::LogPDF) = p==-Inf || isnan(p)
 ratio(p1,p0, ::LogPDF) = p1-p0
 multiply(p1,p0, ::LogPDF) = p1+p0
 delog(p1, ::LogPDF) = exp(p1)
 
-immutable NonLogPDF<:PDFType end
+struct NonLogPDF<:PDFType end
 comp2zero_nan(p, ::NonLogPDF) = p==0 || isnan(p)
 ratio(p1,p0, ::NonLogPDF) = p1/p0
 multiply(p1,p0, ::NonLogPDF) = p1*p0
@@ -303,12 +303,12 @@ default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int, nchains::In
 default_blob_reduce!(stored_blob, new_blob, ni::Int) = _setindex!(stored_blob, new_blob, ni)
 default_blob_reduce!(stored_blob, new_blob, ni::Int, nc::Int) = _setindex!(stored_blob, new_blob, ni, nc)
 # squash chains
-function default_blob_reduce!{T}(blobs::Array{T,3}, chains2keep)
+function default_blob_reduce!(blobs::Array{T,3}, chains2keep) where T
     t = blobs[:,:,chains2keep]
     reshape(t, (size(t,1), size(t,2)*size(t,3)) )
 end
-default_blob_reduce!{T}(blobs::Array{T,2}, chains2keep) = blobs[:,chains2keep][:]
-default_blob_reduce!{T}(blobs::Array{T,1}, chains2keep) = blobs[chains2keep]
+default_blob_reduce!(blobs::Array{T,2}, chains2keep) where {T} = blobs[:,chains2keep][:]
+default_blob_reduce!(blobs::Array{T,1}, chains2keep) where {T} = blobs[chains2keep]
 
 ## The serial MCMC samplers
 ###########################

@@ -1,6 +1,4 @@
-if VERSION>=v"0.5-"
-    addprocs(2) # segfaults on 0.4
-end
+addprocs(2) # segfaults on 0.4
 @everywhere using KissMCMC
 @everywhere using Base.Test, Compat
 
@@ -58,7 +56,7 @@ for dimensions=1:2
         randn_1(n) = randn(n)+1
 
         # log-pdfs
-        unif =  x->-0.25<=x<=0.75 ? 0.0:-Inf
+        unif =  x->-0.25<=x<=0.75 ? 0.0 : -Inf
         npdf =  x ->  -(x-1)^2/2
         exppdf =  x -> x<0 ? -Inf : -x
 
@@ -93,7 +91,7 @@ for dimensions=1:2
             # # MCMC
             # sample PDF
 
-            const sigma = 2.0
+            sigma = 2.0
             sample_prop_normal =  x->randn()*sigma+x
 
             println("Serial MCMC")
@@ -219,45 +217,36 @@ for dimensions=1:2
 
         println("\n\nTwo dimensional parallel tests:\n")
         # note that these are slower than the serial one.  But for expensive logpdf they maybe faster.
-        if VERSION<v"0.5-"
-            println("skipping because of segfaults.")
-        else
-            for test in tests2
-                builtin, builtin_n, logpdf, bins, name, diff = test
-                println("\nTesting $name distribution:")
-
-                if logpdf==npdf2
-                    print("Built-in sampler: ")
-                    builtin_n(1)
-                    @time sa2 = builtin_n(n)
-                else
-                    sa2 = thetas_rosen
-                end
-
-                ## MCMC parallel
-                n_workers = max(length(procs())-1,1)
-                println("Parallel MCMC; number of workers: $n_workers")
-
-                # make one chain per worker
-                a = n_workers>1 ? linspace(0.1,0.9, n_workers):nothing
-                theta0 = n_workers==1 ?  Vector{Float64}[[0.5, 0.5]] : [[0.5,a[i]] for i=1:n_workers]
-
-                print("Metropolisp    : ")
-                metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
-                @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
-                thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop );
-                test_mean_std(sa2, thetasp_, diff)
-                thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop, order=true );
-                test_mean_std(sa2, thetasp_, diff)
-
-                print("emceep          : ")
-                emceep(logpdf, ([0.5, 0.5], 0.1), niter=100, nchains=10);
-                @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷5, nchains=nchains);
-                thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep );
-                test_mean_std(sa2, thetas_ep_, diff)
-                thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep, order=true );
-                test_mean_std(sa2, thetas_ep_, diff)
+        for test in tests2
+            builtin, builtin_n, logpdf, bins, name, diff = test
+            println("\nTesting $name distribution:")
+            if logpdf==npdf2
+                print("Built-in sampler: ")
+                builtin_n(1)
+                @time sa2 = builtin_n(n)
+            else
+                sa2 = thetas_rosen
             end
+            ## MCMC parallel
+            n_workers = max(length(procs())-1,1)
+            println("Parallel MCMC; number of workers: $n_workers")
+            # make one chain per worker
+            a = n_workers>1 ? linspace(0.1,0.9, n_workers) : nothing
+            theta0 = n_workers==1 ?  Vector{Float64}[[0.5, 0.5]] : [[0.5,a[i]] for i=1:n_workers]
+            print("Metropolisp    : ")
+            metropolisp(logpdf, sample_prop_normal2, theta0, niter=10, logpdf=true)
+            @time thetasp, accept_ratiop = metropolisp(logpdf, sample_prop_normal2, theta0, niter=n÷n_workers)
+            thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop );
+            test_mean_std(sa2, thetasp_, diff)
+            thetasp_, accept_ratiop_ = squash_chains(thetasp, accept_ratiop, order=true );
+            test_mean_std(sa2, thetasp_, diff)
+            print("emceep          : ")
+            emceep(logpdf, ([0.5, 0.5], 0.1), niter=100, nchains=10);
+            @time thetas_ep, accept_ratio_ep = emceep(logpdf, ([0.5,0.5], 0.1), niter=n÷5, nchains=nchains);
+            thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep );
+            test_mean_std(sa2, thetas_ep_, diff)
+            thetas_ep_, accept_ratio_ep_ = squash_chains(thetas_ep, accept_ratio_ep, order=true );
+            test_mean_std(sa2, thetas_ep_, diff)
         end
     end
 end

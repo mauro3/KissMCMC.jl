@@ -97,8 +97,8 @@ function _metropolisp!(p0s, theta0s, blob0s, thetas, blobs, pdf, sample_ppdf, ni
     return sdata(thetas), accept_ratio, blobs==nothing ? nothing : sdata(blobs), logposts
 end
 
-immutable IsScalar end
-immutable IsVector end
+struct IsScalar end
+struct IsVector end
 
 # pre re-write
 # emceep          :   4.776336 seconds (18.61 M allocations: 1.204 GB, 2.42% gc time)

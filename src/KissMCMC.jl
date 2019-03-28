@@ -12,12 +12,10 @@ export inverse_transform_sample, rejection_sample_unif, rejection_sample,
 include("samplers-serial.jl")
 include("samplers-parallel.jl")
 
-if VERSION>=v"0.5-"
-    # good old hist is deprecated:
-    function hist(samples,nbins)
-        h=fit(Histogram, samples,nbins=nbins)
-        (h.edges[1], h.weights)
-    end
+# good old hist is deprecated:
+function hist(samples,nbins)
+    h=fit(Histogram, samples,nbins=nbins)
+    (h.edges[1], h.weights)
 end
 
 
@@ -71,7 +69,7 @@ function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i"
             push!(cols[2], abs(t-m))
             push!(cols[3], median(view(thetas,i,1:ns)))
             push!(cols[4], mean(view(thetas,i,1:ns)))
-            push!(cols[5], mod==nothing? nothing : mode[i])
+            push!(cols[5], mod==nothing ? nothing : mode[i])
             push!(cols[6], std(view(thetas,i,1:ns)))
             Rhat!=nothing && push!(cols[7], Rhat[i])
         end
@@ -82,7 +80,7 @@ function summarize_run(thetas::Matrix; theta_true=similar(thetas,0), names=["$i"
             push!(cols[1], Symbol(names[i]))
             push!(cols[2], median(view(thetas,i,1:ns)))
             push!(cols[3], mean(view(thetas,i,1:ns)))
-            push!(cols[4], mode==nothing? nothing : mode[i])
+            push!(cols[4], mode==nothing ? nothing : mode[i])
             push!(cols[5], std(view(thetas,i,1:ns)))
             Rhat!=nothing && push!(cols[6], Rhat[i])
         end
