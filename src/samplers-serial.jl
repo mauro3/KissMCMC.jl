@@ -471,7 +471,7 @@ Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
 
 Example
 
-    thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+    thetas, accept_ratio, _, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
 """
 function emcee(pdf, theta0;
                nchains=10^2,
@@ -564,36 +564,145 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
+# """
+#     evaluate_convergence(thetas; indices=1:size(thetas)[1])
+
+# Evaluates:
+# - R̂ (potential scale reduction): should be <1.1
+# - total effective sample size of all chains combined, and
+# - the average thinning factor
+
+# See Gelman etal 2014, page 281-287
+
+# Note that https://dfm.io/posts/autocorr/ says "you should not compute
+# the G–R statistic using multiple chains in the same emcee ensemble because
+# the chains are not independent!"
+
+# Example
+
+#     thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+#     Rhat, sample_size, nthin = evaluate_convergence(thetas)
+# """
+# function evaluate_convergence(thetas; indices=1:size(thetas)[1])
+#     Rs = Float64[]
+#     sample_size = Float64[]
+#     nchains = size(thetas)[3]
+#     split = size(thetas)[2]÷2
+#     for i in indices
+#         chains = vcat([thetas[i,1:split,n] for n=1:nchains], [thetas[i,split+1:2*split,n] for n=1:nchains])
+#         push!(Rs, potential_scale_reduction(chains...))
+#         push!(sample_size, sum(effective_sample_size.(chains)))
+#     end
+#     nthin = size(thetas)[2]*size(thetas)[3]/mean(sample_size)
+#     return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
+# end
+
+
 """
-    evaluate_convergence(thetas; indices=1:size(thetas)[1])
+    int_acorr(thetas::Array{<:Any,3}, c=5)
 
-Evaluates:
-- R̂ (potential scale reduction): should be <1.05
-- total effective sample size of all chains combined, and
-- the average thinning factor
+Returns:
+- Estimated integrated autocorrelation time τ (in number of steps)
+- Indication whether the estimate has converged (true/false)
 
-See Gelman etal 2014, page 281-287
+τ gives the factor by which the
+variance of the calculated expectation of y is larger than for
+independent samples.
 
-Example
+In other words:
+- τ is the number of steps that are needed before the chain "forgets" where it started.
+- N/τ is the effective number of samples (N is total number of samples)
 
-    thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
-    Rhat, sample_size, nthin = evaluate_convergence(thetas)
+This means that, if you can estimate τ, then you can estimate the number
+of samples that you need to generate to reduce the relative error on your
+target integral to (say) a few percent.
+
+NOTE: the employed algorithm is not that great at estimating τ
+with short chain lengths.  To get good estimates a chain length greater than
+50τ is recommended (which may well be longer than what you actually need).
+By default this function will warn if the estimate is likely not converged.
+
+Optionals:
+- c -- window width to search when calculating autocor (5)
+- warn -- warn if chain length is too small for an accurate τ estimate (true)
+
+Note: It is important to remember that f depends on the specific
+function f(θ). This means that there isn't just one integrated
+autocorrelation time for a given Markov chain. Instead, you must
+compute a different τ for any integral you estimate using the samples.
+
+Ref:
+https://dfm.io/posts/autocorr/
+Adapted from various bits of the code there.
 """
-function evaluate_convergence(thetas; indices=1:size(thetas)[1])
-    Rs = Float64[]
-    sample_size = Float64[]
-    nchains = size(thetas)[3]
-    split = size(thetas)[2]÷2
-    for i in indices
-        chains = vcat([thetas[i,1:split,n] for n=1:nchains], [thetas[i,split+1:2*split,n] for n=1:nchains])
-        push!(Rs, potential_scale_reduction(chains...))
-        push!(sample_size, sum(effective_sample_size.(chains)))
+function int_acorr(thetas::Array{<:Any,3}, c=5, warn=true)
+    sz = size(thetas)
+    ntheta, nsamples, nchains = size(thetas)
+    out = Float64[]
+    for n = 1:ntheta
+        # mean autocorr of all chains:
+        rho = zeros(nsamples÷2)
+        for cc = 1:nchains
+            rho .+= acor1d(thetas[n,:,cc])
+        end
+        rho ./= nchains
+        # the -1 correct see https://github.com/dfm/emcee/issues/267#issuecomment-477556521
+        taus = 2 * cumsum(rho) - 1
+        window = auto_window(taus, c)
+        push!(out, taus[window])
     end
-    nthin = size(thetas)[2]*size(thetas)[3]/mean(sample_size)
-    return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
+    converged = !any(out.>nsamples/50)
+    if warn && !converged
+        Base.warn("Estimate of integrated autocorrelation likely not accurate!")
+    end
+    return out, converged
 end
 
+"""
+    eff_samples(thetas::Array{<:Any,3}, c=5)
 
+Return
+- number of effective samples for each θ component for all chains together
+- thinning step (essentially equal to τ)
+- whether estimates are converged
+"""
+function eff_samples(thetas::Array{<:Any,3}, c=5)
+    acorr, converged = int_acorr(thetas, c, false)
+    ns = size(thetas,2)./acorr * size(thetas,3)
+    return round.(Int, ns), round(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), converged
+end
+
+## helper functions
+import Base.DFT
+function acor1d(x::AbstractVector, norm=true)
+    # TODO for speed:
+    #n = DFT.nextprod([2,3,4,5], length(x))
+
+    # Compute the FFT and then (from that) the auto-correlation function
+    f = DFT.fft(x - mean(x))
+    acf = real.(DFT.ifft(f .* conj(f)))# TODO [1:length(x)]
+    acf ./= 4*length(x)
+
+    # Optionally normalize
+    if norm
+        acf ./= acf[1]
+    end
+
+    return acf[1:length(acf)÷2]
+end
+
+"""
+    auto_window(taus, c)
+
+Gives the ±window over which the autocorr should be integrated
+to get a good estimate.  `c` defaults to 5.
+"""
+function auto_window(taus, c)
+    for (i,t) in enumerate(taus)
+        i >= c*t && return i
+    end
+    return length(taus)-1
+end
 
 """
     squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;

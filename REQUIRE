@@ -3,4 +3,3 @@ StatsBase
 Distributions
 ProgressMeter
 DataFrames
-MCMCDiagnostics

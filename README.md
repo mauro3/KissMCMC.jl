@@ -21,7 +21,9 @@ thetas, accept_ratio = metropolis(logpdf, sample_prop_normal, theta0, niter=10^5
 println("Accept ratio Metropolis: $accept_ratio")
 
 # emcee MCMC sampler:
-thetase, accept_ratioe = emcee(logpdf, (theta0,0.1), niter=10^4, nchains=10)
+thetase, accept_ratioe = emcee(logpdf, (theta0,0.1), niter=10^5, nchains=10)
+# check convergence using integrated autocorrelation
+eff_samples(reshape(thetase,(1,size(thetase)...)))[1][1] # number of effective samples ~ 255
 thetase, accept_ratioe = squash_chains(thetase,accept_ratioe) # puts all chains into one
 println("Accept ratio emcee: $accept_ratio")
 

@@ -3,11 +3,10 @@ using StatsBase, DataFrames
 using ProgressMeter
 using Compat
 import Compat.view
-using MCMCDiagnostics
 
 export inverse_transform_sample, rejection_sample_unif, rejection_sample,
        metropolis, emcee, metropolisp, emceep, squash_chains,
-       autocor_length, print_results, evaluate_convergence
+       autocor_length, print_results, int_acorr, eff_samples
 
 include("samplers-serial.jl")
 include("samplers-parallel.jl")
