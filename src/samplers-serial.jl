@@ -599,15 +599,15 @@ sample_g(a) = cdf_g_inv(rand(), a)
 
 
 """
-    int_acorr(thetas::Array{<:Any,3}, c=5)
+    int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
 
 Returns:
-- Estimated integrated autocorrelation time τ (in number of steps)
-- Indication whether the estimate has converged (true/false)
+- Estimated integrated autocorrelation time τ (in number of steps) for each theta
+- Indication whether the estimate has converged as ratio between chain-length and
+  τ.  Should probably be larger than 50 or 100.  (again for each theta)
 
-τ gives the factor by which the
-variance of the calculated expectation of y is larger than for
-independent samples.
+τ gives the factor by which the variance of the calculated expectation of y
+is larger than for independent samples.
 
 In other words:
 - τ is the number of steps that are needed before the chain "forgets" where it started.
@@ -626,16 +626,22 @@ Optionals:
 - c -- window width to search when calculating autocor (5)
 - warn -- warn if chain length is too small for an accurate τ estimate (true)
 
-Note: It is important to remember that f depends on the specific
-function f(θ). This means that there isn't just one integrated
-autocorrelation time for a given Markov chain. Instead, you must
-compute a different τ for any integral you estimate using the samples.
+Notes:
+- It is important to remember that f depends on the specific
+  function f(θ). This means that there isn't just one integrated
+  autocorrelation time for a given Markov chain. Instead, you must
+  compute a different τ for any integral you estimate using the samples.
+- works equally with thinned an non-thinned chains
+- whilst it is not recommended by the referenced work, it is probably ok
+  to apply this also to a squashed chain.  Then run it as:
+  `int_acorr(reshape(thetas, (size(thetas,1), size(thetas,2), 1))`
 
 Ref:
-https://dfm.io/posts/autocorr/
+https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
 Adapted from various bits of the code there.
 """
-function int_acorr(thetas::Array{<:Any,3}, c=5, warn=true)
+function int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
+    @assert c>1
     sz = size(thetas)
     ntheta, nsamples, nchains = size(thetas)
     out = Float64[]
@@ -651,8 +657,8 @@ function int_acorr(thetas::Array{<:Any,3}, c=5, warn=true)
         window = auto_window(taus, c)
         push!(out, taus[window])
     end
-    converged = !any(out.>nsamples/50)
-    if warn && !converged
+    converged = nsamples./out # probably converged if > 50
+    if warn && any(converged.<warnat)
         Base.warn("Estimate of integrated autocorrelation likely not accurate!")
     end
     return out, converged
@@ -661,15 +667,23 @@ end
 """
     eff_samples(thetas::Array{<:Any,3}, c=5)
 
-Return
-- number of effective samples for each θ component for all chains together
-- thinning step (essentially equal to τ)
-- whether estimates are converged
+Return scalars:
+- total mean number of effective samples
+- suggested thinning step (essentially equal to the mean τ)
+- mean τ-convergence estimate  (as ratio chain-length and τ,
+  should be greater than 50 or 100 or so)
+Return vectors for each θ component
+- total number of effective samples
+- τ auto correlation steps
+- per chain estimates whether τ-estimates are converged
+
+(the last two output are pass on from int_acorr)
 """
-function eff_samples(thetas::Array{<:Any,3}, c=5)
-    acorr, converged = int_acorr(thetas, c, false)
+function eff_samples(thetas::Array{<:Any,3}; c=5)
+    acorr, converged = int_acorr(thetas, c=c, warn=false)
     ns = size(thetas,2)./acorr * size(thetas,3)
-    return round.(Int, ns), round(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), converged
+    return (round.(Int, mean(ns)), round(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), mean(converged),
+            round.(Int, ns), acorr, converged)
 end
 
 ## helper functions
@@ -712,8 +726,7 @@ end
                                                                  verbose=true,
                                                                  order=false
                                                                  )
-Puts the samples of all chains into one vector.  Note that afterwards Rhat cannot
-be computed anymore.
+Puts the samples of all chains into one vector.
 
 This can also drop chains which have a low accept ratio (this can happen with
 emcee), by setting drop_low_accept_ratio (Although whether it is wise to
