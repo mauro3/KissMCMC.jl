@@ -686,6 +686,28 @@ function eff_samples(thetas::Array{<:Any,3}; c=5)
             round.(Int, ns), acorr, converged)
 end
 
+"""
+
+"""
+function samples_vs_tau(thetas::Array{<:Any,3})
+    N = round(Int, logspace(2,log10(size(thetas,2)), 10))
+    nthin = 1
+
+    taus = []
+    # converged = []
+    NN = []
+    for n in N
+        if length(1:nthin:n)>3
+            tau, conv = KissMCMC.int_acorr(thetas[:, 1:nthin:n, :], warn=false)
+            push!(taus, tau)
+            # push!(converged, conv)
+            push!(NN,length(1:nthin:n))
+        end
+    end
+    taus = hcat(taus...)'
+    return NN, taus
+end
+
 ## helper functions
 import Base.DFT
 function acor1d(x::AbstractVector, norm=true)

@@ -46,14 +46,16 @@ plot(NN, taus,
 plot!(NN, NN/50, label="N/50", color=:black, ls=:dash)
 
 # What happens when the chains are concatenated?
-# This seems to work also.  I suspect this only works at longer chain lengths
+# This seems to work also.  I suspect this only works at longer chain lengths.
+#
+# Testing this on "real" data gave less promising results...
 thetass = squash_chains(thetas)[1]
 chain = reshape(thetass[1,:], (1, size(thetass,2), 1))
 
 taus = []
 converged = []
 NN = []
-for n in N*nwalkers
+for n in round(Int, logspace(2,log10(length(chain)), 10))
     if length(1:nthin:n)>3
         tau, conv = KissMCMC.int_acorr(chain[:, 1:nthin:n, :], warn=false)
         push!(taus, tau[1])
