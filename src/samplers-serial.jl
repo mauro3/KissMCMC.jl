@@ -564,38 +564,41 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
-# """
-#     evaluate_convergence(thetas; indices=1:size(thetas)[1])
+"""
+    evaluate_convergence(thetas1, thetas2; indices=1:size(thetas)[1], walkernr=1)
 
-# Evaluates:
-# - R̂ (potential scale reduction): should be <1.1
-# - total effective sample size of all chains combined, and
-# - the average thinning factor
+Evaluates:
+- R̂ (potential scale reduction): should be <1.1
+- total effective sample size of all chains combined, and
+- the average thinning factor
 
-# See Gelman etal 2014, page 281-287
+See Gelman etal 2014, page 281-287
 
-# Note that https://dfm.io/posts/autocorr/ says "you should not compute
-# the G–R statistic using multiple chains in the same emcee ensemble because
-# the chains are not independent!"
+Note that https://dfm.io/posts/autocorr/ says "you should not compute
+the G–R statistic using multiple chains in the same emcee ensemble because
+the chains are not independent!"  Thus this needs input from two separate emcee runs.
 
-# Example
+Example
 
-#     thetas, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
-#     Rhat, sample_size, nthin = evaluate_convergence(thetas)
-# """
-# function evaluate_convergence(thetas; indices=1:size(thetas)[1])
-#     Rs = Float64[]
-#     sample_size = Float64[]
-#     nchains = size(thetas)[3]
-#     split = size(thetas)[2]÷2
-#     for i in indices
-#         chains = vcat([thetas[i,1:split,n] for n=1:nchains], [thetas[i,split+1:2*split,n] for n=1:nchains])
-#         push!(Rs, potential_scale_reduction(chains...))
-#         push!(sample_size, sum(effective_sample_size.(chains)))
-#     end
-#     nthin = size(thetas)[2]*size(thetas)[3]/mean(sample_size)
-#     return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
-# end
+    thetas1, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+    thetas2, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+    Rhat, sample_size, nthin = evaluate_convergence(thetas1, thetas2)
+"""
+function evaluate_convergence(thetas1, thetas2; indices=1:size(thetas1)[1],
+                              walkernr=1)
+    @assert size(thetas1)==size(thetas2)
+    Rs = Float64[]
+    sample_size = Float64[]
+    split = size(thetas1)[2]÷2
+    for i in indices
+        chains = [thetas1[i,1:split,walkernr], thetas2[i,split+1:2*split,walkernr]]
+        push!(Rs, MCMCDiagnostics.potential_scale_reduction(chains...))
+        push!(sample_size, sum(MCMCDiagnostics.effective_sample_size.(chains)))
+    end
+    nwalkers = length(size(thetas1))==3 ? size(thetas1)[3] : 1
+    nthin = size(thetas1)[2]*nwalkers/mean(sample_size)
+    return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
+end
 
 
 """
@@ -661,6 +664,11 @@ function int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
     if warn && any(converged.<warnat)
         Base.warn("Estimate of integrated autocorrelation likely not accurate!")
     end
+    if any(isnan.(out)) || any(isnan.(converged))
+        # set both to -1 in this case (a hack)
+        out = out*false - 1
+        converged = converged*false -1
+    end
     return out, converged
 end
 
@@ -678,16 +686,31 @@ Return vectors for each θ component
 - per chain estimates whether τ-estimates are converged
 
 (the last two output are pass on from int_acorr)
+
+Example:
+
+    Neff, τ, conv, Neffs, τs, convs = eff_samples(theta)
 """
 function eff_samples(thetas::Array{<:Any,3}; c=5)
     acorr, converged = int_acorr(thetas, c=c, warn=false)
     ns = size(thetas,2)./acorr * size(thetas,3)
-    return (round.(Int, mean(ns)), round(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), mean(converged),
+    return (round.(Int, mean(ns)), round.(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), mean(converged),
             round.(Int, ns), acorr, converged)
 end
 
 """
+    samples_vs_tau(thetas::Array{<:Any,3})
 
+Returns samples vs τ as is plotted in
+https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
+
+To plot do:
+
+    using Plots
+    N,taus = KissMCMC.samples_vs_tau(thetas);
+    plot(N,taus)
+    # additionally plot the N/50 line
+    plot!(N, N/50, ls=:dash, c=:black)
 """
 function samples_vs_tau(thetas::Array{<:Any,3})
     N = round(Int, logspace(2,log10(size(thetas,2)), 10))
@@ -706,6 +729,28 @@ function samples_vs_tau(thetas::Array{<:Any,3})
     end
     taus = hcat(taus...)'
     return NN, taus
+end
+
+"""
+    error_of_estimated_mean(thetas::Array{<:Any,3},
+                            Neff = eff_samples(thetas)[4])
+
+Calculates the error in the estimated mean of each theta.
+
+Return estimates of:
+- mean(theta)
+- error of mean
+- std(theta)
+
+Ref:
+15.4.3 in https://mc-stan.org/docs/2_18/reference-manual/effective-sample-size-section.html
+"""
+function error_of_estimated_mean(thetas::Array{<:Any,3},
+                                 Neff = eff_samples(thetas)[4])
+    mtheta = mean(mean(thetas,2),3)[:]
+    stheta = std(std(thetas,2),3)[:]
+    err_of_mean = stheta./sqrt(Neff)
+    return mtheta, err_of_mean, stheta
 end
 
 ## helper functions

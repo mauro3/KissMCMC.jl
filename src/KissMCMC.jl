@@ -3,6 +3,7 @@ using StatsBase, DataFrames
 using ProgressMeter
 using Compat
 import Compat.view
+import MCMCDiagnostics
 
 export inverse_transform_sample, rejection_sample_unif, rejection_sample,
        metropolis, emcee, metropolisp, emceep, squash_chains,
