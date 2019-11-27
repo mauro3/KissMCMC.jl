@@ -53,16 +53,17 @@ function metropolis(pdf, sample_ppdf, theta0;
                     nburnin=niter÷2,
                     nthin=1,
                     use_progress_meter=true,
+                    hasblob=false
                     )
     # initialize
     theta0 = deepcopy(theta0)
-    pdf_ = hasblob(pdf, theta0) ? pdf : t -> (pdf(t), nothing)
+    pdf_ = hasblob ? pdf : t -> (pdf(t), nothing)
     p0, blob0 = pdf_(theta0)
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
-    #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob(pdf, theta0))
-    _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob(pdf, theta0))
+    #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
+    _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
 end
 function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
     nsamples = (niter-nburnin) ÷ nthin
@@ -170,7 +171,8 @@ function emcee(pdf, theta0s;
                nburnin=niter÷2,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-               use_progress_meter=true
+               use_progress_meter=true,
+               hasblob=false
                )
     @assert a_scale>1
     nchains = length(theta0s)
@@ -180,14 +182,14 @@ function emcee(pdf, theta0s;
     @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
     # initialize
-    pdf_ = hasblob(pdf, theta0s[1]) ? pdf : t -> (pdf(t), nothing)
+    pdf_ = hasblob ? pdf : t -> (pdf(t), nothing)
     tmp = pdf_.(theta0s)
     p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
 
     # initialize progress meter
     prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
-    _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
+    _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
 end
 
 "Makes output arrays"
@@ -466,7 +468,13 @@ end
 #     # TODO for speed:
 #     #n = DFT.nextprod([2,3,4,5], length(x))
 
-#     # Compute the FFT and then (from that) the auto-correlation function
+#     # Compute the FFT and then (from that) """
+#     hasblob(pdf, theta) = length(pdf(theta))==2
+
+# Test if the log-pdf returns a blob
+# """
+# hasblob(pdf, theta) = length(pdf(theta))==2
+# the auto-correlation function
 #     f = DFT.fft(x - mean(x))
 #     acf = real.(DFT.ifft(f .* conj(f)))# TODO [1:length(x)]
 #     acf ./= 4*length(x)
@@ -491,6 +499,56 @@ end
 #     end
 #     return length(taus)-1
 # end
+
+"""
+    make_theta0s(theta0::T, ball_radius::T, pdf, nchains;
+                      ball_radius_halfing_steps=7, # make the ball smaller this often
+                      ntries=100*nchains, # how many tries per pall radius
+                      hasblob=false) where T
+
+Tries to find theta0s with nonzero density within a ball from theta0.
+
+Example
+
+    pdf = x-> -sum(x.^2)
+    nchains = 100
+    samples = emcee(pdf, make_theta0s([0.0, 0.0], [0.1, 0.1], pdf, nchains), nburnin=0, use_progress_meter=false);
+"""
+function make_theta0s(theta0::T, ball_radius::T, pdf, nchains;
+                      ball_radius_halfing_steps=7,
+                      ntries=100,
+                      hasblob=false) where T
+    npara = length(theta0)
+    if ball_radius isa Number
+        ball_radius = ones(npara) * ball_radius
+    end
+    @assert length(ball_radius)==npara
+
+    theta0s = T[]
+
+    for i=1:nchains
+        for k=1:ball_radius_halfing_steps
+            j = 0
+            ball_radius ./= 2^(k-1)
+            for j=1:ntries
+                tmp = theta0 .+ randn(npara).*ball_radius
+                if hasblob
+                    p0, blob0 = pdf(tmp)
+                else
+                    p0, blob0 = pdf(tmp), nothing
+                end
+                if p0>-Inf
+                    push!(theta0s, tmp)
+                    break
+                end
+            end
+            length(theta0s)==i && break # found suitable thetas for this chain
+            j==ntries && k==ball_radius_halfing_steps &&
+                error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
+        end
+    end
+    return theta0s
+end
 
 
 """

@@ -6,18 +6,11 @@ using ProgressMeter, StaticArrays
 # std-lib:
 using Distributed, Statistics
 
-export metropolis, emcee, metropolisp, emceep, squash_chains,
-       autocor_length, eff_samples
+export metropolis, emcee, squash_chains, make_theta0s
 
 include("samplers-serial.jl")
 #include("samplers-parallel.jl")
 
-"""
-    hasblob(pdf, theta) = length(pdf(theta))==2
-
-Test if the log-pdf returns a blob
-"""
-hasblob(pdf, theta) = length(pdf(theta))==2
 
 ######
 # Output
