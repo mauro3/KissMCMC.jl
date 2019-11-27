@@ -6,158 +6,6 @@
 #
 # https://pymc-devs.github.io/pymc/theory.html
 
-
-"""
-Initializes storage and other bits for Metropolis-Hastings.
-
-If nchains==0 then assume that this MCMC cannot handle several chains.
-
-- Returns pdf which blobs.
-"""
-function initialize_mh(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!;
-                     make_SharedArray=false, ball_radius_halfing_steps=7)
-
-    ntries = max(100,nburnin÷100) # how many tries per chain to find a IC with nonzero density
-
-    pdftype = logpdf ? LogPDF() : NonLogPDF()
-    pdf = hasblob(pdf_, theta0) ? pdf_ : theta -> (pdf_(theta), nothing)
-
-    # Make initial chain positions and value of blob0 and p0
-    if nchains==0 # a single theta is given and no chains are used, i.e. a single chain algo
-        p0, blob0 = pdf(theta0)
-        comp2zero_nan(p0, pdftype) && error("theta0=$(theta0) has zero density.  Choose another theta0.")
-    elseif isa(theta0, Tuple) # Case: (theta0, ball_radius) Can only be used with Float parameters
-        comp2zero_nan(pdf(theta0[1])[1], pdftype) && error("theta0[1]=$(theta0[1]) has zero density.  Choose another theta0[1].")
-
-        # Initialize loop storage
-        T = typeof(theta0[1])
-        p0s = Float64[]
-        sizehint!(p0s, nchains)
-        theta0s = T[]
-        sizehint!(theta0s, nchains)
-        p0, blob0 = pdf(theta0[1])
-        blob0s = typeof(blob0)[]
-        sizehint!(blob0s, nchains)
-
-        if isa(theta0[1], Number)
-            for i=1:nchains
-                for k=1:ball_radius_halfing_steps
-                    j = 0
-                    radius = theta0[2] / 2^(k-1)
-                    for j=1:ntries
-                        tmp = theta0[1] + rand()*radius
-                        p0, blob0 = pdf(tmp)
-                        if !comp2zero_nan(p0,pdftype)
-                            push!(theta0s, tmp)
-                            push!(blob0s, blob0)
-                            push!(p0s, p0)
-                            break
-                        end
-                    end
-                    length(theta0s)==i && break # found a suitable theta for this chain
-                    j==ntries && k==ball_radius_halfing_steps &&
-                        error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
-                end
-            end
-
-        else # assume theta0[1] is a Vector of numbers
-            npara = length(theta0[1])
-            radius = isa(theta0[2], Number) ? theta0[2]*ones(npara) : theta0[2]
-            @assert length(radius)==npara
-            for i=1:nchains
-                for k=1:ball_radius_halfing_steps
-                    j = 0
-                    radius ./= 2^(k-1)
-                    for j=1:ntries
-                        tmp = theta0[1] + randn(npara).*radius
-                        p0, blob0 = pdf(tmp)
-                        if !comp2zero_nan(p0,pdftype)
-                            push!(theta0s, tmp)
-                            push!(blob0s, blob0)
-                            push!(p0s, p0)
-                            break
-                        end
-                    end
-                    length(theta0s)==i && break # found suitable thetas for this chain
-                    j==ntries && k==ball_radius_halfing_steps &&
-                        error("Could not find suitable initial theta.  PDF is zero in too many places inside ball.")
-                end
-            end
-        end
-    elseif isa(theta0, AbstractVector) # Case: all theta0 are given
-        nchains = length(theta0)
-
-        # Initialize loop storage
-        T = typeof(theta0[1])
-        theta0s = convert(Vector{T}, theta0)
-        p0s = Float64[]
-        sizehint!(p0s, nchains)
-        p0, blob0 = pdf(theta0s[1])
-        blob0s = typeof(blob0)[]
-        sizehint!(blob0s, nchains)
-
-        if !isleaftype(eltype(theta0s))
-            warn("The input theta0 Vector has abstract eltype: $(eltype(theta0s)).  This will hurt performance!")
-        end
-        # Check that IC has nonzero pdf, otherwise drop it:
-        chains2drop = Int[]
-        for nc =1:nchains
-            p0, blob0 = pdf(theta0s[nc])
-            if comp2zero_nan(p0,pdftype) #p0==0
-                warning("""Initial parameters of chain #$nc have zero probability density.
-                        Skipping this chain.
-                        theta0=$(theta0s[nc])
-                        """)
-                push!(chains2drop, nc)
-            else
-                # initialize p0s and blob0s
-                push!(p0s, p0)
-                push!(blob0s, blob0)
-            end
-        end
-        deleteat!(theta0s, chains2drop)
-        deleteat!(p0s, chains2drop)
-        deleteat!(blob0s, chains2drop)
-        nchains = length(theta0s)
-    else
-        error("Bad theta0, check docs for allowed theta zero input.")
-    end
-
-
-    if nchains==0
-        # Initialize output storage
-        thetas = _make_storage(theta0, niter, nburnin, nthin)
-        logposts = _make_storage(1.0, niter, nburnin, nthin)
-        blobs = blob_reduce!(blob0, niter, nburnin, nthin)
-        return pdf, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts
-    else
-        # Initialize output storage
-        thetas = _make_storage(theta0s[1], niter, nburnin, nthin, nchains)
-        logposts = _make_storage(1.0, niter, nburnin, nthin, nchains)
-        blobs = blob_reduce!(blob0s[1], niter, nburnin, nthin, nchains)
-
-        if make_SharedArray
-            if !isbits(eltype(theta0s[1]))
-                # SharedArrays only work with isbits types
-                error("Only isbits types supported in parallel runs for eltype(theta).")
-            end
-            p0s, thetas = map(x->convert(SharedArray,x), (p0s, thetas))
-            # Each worker will have its own copy of theta0s.  Considering the size of thetas this is fine.
-            # theta0s = distribute(theta0s)
-            if blobs!=nothing
-                if !isbits(eltype(blob0s[1]))
-                    error("Only isbits types supported in parallel runs for eltype(blob).")
-                end
-                blobs = convert(SharedArray, blobs)
-                # Each worker will have its own copy of blob0s.  Considering the size of blobs this is fine.
-                # blob0s = distribute(blob0s)
-            end
-
-        end
-        return pdf, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts
-    end
-end
-
 """
     metropolis(pdf, sample_ppdf, theta0;
                niter=10^5,
@@ -188,14 +36,17 @@ Optional keyword input:
 - nthin -- only store every n-th sample (default=1)
 - use_progress_meter=true : whether to show a progress meter
 
+Notes:
+- single threaded
+
 Output:
 
 - samples:
   - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
   - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
-- blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
 - logdensities: the value of the log-density for each sample
+- blobs: anything else that the pdf-function returns as second argument
 """
 function metropolis(pdf, sample_ppdf, theta0;
                     niter=10^5,
@@ -210,6 +61,7 @@ function metropolis(pdf, sample_ppdf, theta0;
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
+    #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob(pdf, theta0))
     _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob(pdf, theta0))
 end
 function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
@@ -254,7 +106,7 @@ function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin,
         end
     end
     accept_ratio = naccept/(niter-nburnin)
-    return thetas, accept_ratio, blobs, logdensities
+    return thetas, accept_ratio, logdensities, blobs
 end
 
 ####
@@ -286,7 +138,7 @@ Note that theta0s[1] need to support `.+`, `.*`, and `length`.
 
 Optional key-word input:
 
-- niter -- total number of steps to take (10^5) (==total number of posterior evaluations).
+- niter -- total number of steps to take (10^5) (==total number of log-density evaluations).
 - nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - use_progress_meter=true : whether to show a progress meter
@@ -295,10 +147,11 @@ Output:
 
 - samples: of type & size `Matrix{typeof(theta0)}(niter-nburnin, nchains)`
 - accept_ratio: ratio of accepted to total steps
-- blobs: anything else that the pdf-function returns as second argument
 - logdensities: the value of the log-density for each sample
+- blobs: anything else that the pdf-function returns as second argument
 
-Note: use `squash_chains(samples)` to concatenate all chains into one chain.
+Notes:
+- use `squash_chains(samples)` to concatenate all chains into one chain.
 
 Reference:
 sqrt(var(naccept))
@@ -310,7 +163,7 @@ sqrt(var(naccept))
 
 Example
 
-    thetas, accept_ratio, _, logposteriors = emcee(x->sum(-x.^2),
+    thetas, accept_ratio, _, logdensities = emcee(x->sum(-x.^2),
     ([1.0,2, 5], 0.1))
 """
 function emcee(pdf, theta0s;
@@ -322,20 +175,20 @@ function emcee(pdf, theta0s;
                )
     @assert a_scale>1
     nchains = length(theta0s)
+    @assert iseven(nchains) "Use an even number of chains."
     niter_chain = niter ÷ nchains
     nburnin_chain = nburnin ÷ nchains
     @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
     # initialize
-    theta0s = deepcopy(theta0s)
     pdf_ = hasblob(pdf, theta0s[1]) ? pdf : t -> (pdf(t), nothing)
     tmp = pdf_.(theta0s)
     p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
-    @assert eltype(p0s) <: AbstractFloat "The log-density needs to return a AbstractFloat"
 
     # initialize progress meter
     prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
+    #@inferred _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
     _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
 end
 
@@ -369,7 +222,6 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, 
             if (N-1)*log(z) + p1 - p0s[nc] >= log(rand())
                 theta0s[nc] = theta1
                 p0s[nc] = p1
-
                 blob0s[nc] = blob1
                 naccept[nc] += 1
             end
@@ -400,7 +252,7 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, 
     end # for n=(1-nburnin_chain):(niter_chain-nburnin_chain)
 
     accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
-    return thetas, accept_ratio, blobs, logdensities
+    return thetas, accept_ratio, logdensities, blobs
 end
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
@@ -412,6 +264,10 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
+"""
+
+Same as emcee but multi-threaded.  Only worth it if the logdensity function is expensive enough.
+"""
 function emceep(pdf, theta0s;
                niter=10^5,
                nburnin=niter÷2,
@@ -437,14 +293,18 @@ function emceep(pdf, theta0s;
     _emceep(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
 end
 
+function init_storage(v0s, nchains, niter_chain)
+    vs = [eltype(v0s)[] for i=1:nchains]
+    sizehint!.(vs, niter_chain)
+    return vs
+end
+init_storage(v0s::Array{Nothing,1}, nchains, niter_chain) = nothing
+
 function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
     # initialize output
-    thetas = [eltype(theta0s)[] for i=1:nchains]
-    sizehint!.(thetas, niter_chain)
-    blobs =  [eltype(blob0s)[] for i=1:nchains]
-    hasblob && sizehint!.(blobs, niter_chain)
-    logdensities =  [eltype(p0s)[] for i=1:nchains]
-    sizehint!.(logdensities, niter_chain)
+    thetas = init_storage(theta0s, nchains, niter_chain)
+    blobs = init_storage(blob0s, nchains, niter_chain)
+    logdensities = init_storage(p0s, nchains, niter_chain)
 
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
@@ -498,7 +358,7 @@ function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains,
     end # for n=(1-nburnin_chain):(niter_chain-nburnin_chain)
 
     accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
-    return thetas, accept_ratio, blobs, logdensities
+    return thetas, accept_ratio, logdensities, blobs
 end
 
 
@@ -726,92 +586,75 @@ end
 #     return length(taus)-1
 # end
 
-# """
-#     squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
-#                                                                  drop_low_accept_ratio=false,
-#                                                                  drop_fact=1,
-#                                                                  blob_reduce! =default_blob_reduce!,
-#                                                                  verbose=true,
-#                                                                  order=false
-#                                                                  )
-# Puts the samples of all chains into one vector.
+"""
+    squash_chains(thetas, accept_ratio, blobs, logdensities;
+                                                         drop_low_accept_ratio=false,
+                                                         drop_fact=2,
+                                                         verbose=true,
+                                                         order=false) # if true the samples are ordered
 
-# This can also drop chains which have a low accept ratio (this can happen with
-# emcee), by setting drop_low_accept_ratio (Although whether it is wise to
-# do so is another question).  drop_fact -> increase to drop more chains.
+Puts the samples of all chains into one vector.
 
-# Returns:
-# - theta
-# - mean(accept_ratio[chains2keep])
-# - blobs
-# - log-posteriors
-# - reshape_revert: reshape(thetas_out, reshape_revert...) will put it back into the chains.
-# """
-# function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
-#                                                                  drop_low_accept_ratio=false,
-#                                                                  drop_fact=2,
-#                                                                  blob_reduce! =default_blob_reduce!,
-#                                                                  verbose=true,
-#                                                                  order=false
-#                                                                  )
-#     nchains=length(accept_ratio)
-#     if drop_low_accept_ratio
-#         chains2keep = Int[]
-#         # this is a bit of a hack, but emcee seems to sometimes have
-#         # chains which are stuck in oblivion.  These have a very low
-#         # acceptance ratio, thus filter them out.
-#         ma,sa = median(accept_ratio), std(accept_ratio)
-#         verbose && println("Median accept ratio is $ma, standard deviation is $sa\n")
-#         for nc=1:nchains
-#             if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
-#                 verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
-#                 continue
-#             end
-#             push!(chains2keep, nc)
-#         end
-#     else
-#         chains2keep = collect(1:nchains) # collect to make chains2keep::Vector{Int}
-#     end
+This can also drop chains which have a low accept ratio (this can happen with
+emcee, but I am anything but sure whether this is ok),
+by setting drop_low_accept_ratio=true.  drop_fact -> increase to drop more chains.
 
-#     # TODO: below creates too many temporary arrays
-#     if ndims(thetas)==3
-#         t = thetas[:,:,chains2keep]
-#         reshape_revert = size(t)
-#         t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
-#     else
-#         t = thetas[:,chains2keep]
-#         reshape_revert = size(t)
-#         t = t[:]
-#     end
-#     if logposts==nothing
-#         l = nothing
-#     else
-#         l = logposts[:,chains2keep][:]
-#     end
-#     if blobs==nothing
-#         b = nothing
-#     else
-#         b = blob_reduce!(blobs, chains2keep)
-#     end
-#     if order # order such that early samples are early in thetas
-#         nc = length(chains2keep)
-#         ns = size(thetas,1)
-#         perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
-#         if blobs!=nothing
-#             b = b[perm]
-#         end
-#         if logposts!=nothing
-#             l = l[perm]
-#         end
-#         if ndims(thetas)==3
-#             t = t[:,perm]
-#         else
-#             t = t[perm]
-#         end
-#         reshape_revert = nothing # not possible to reorder
-#     end
-#     return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
-# end
+Returns:
+- thetas
+- mean(accept_ratio[chains2keep])
+- blobs
+- log-densities
+"""
+function squash_chains(thetas, accept_ratio, logdensities, blobs;
+                       drop_low_accept_ratio=false,
+                       drop_fact=2,
+                       verbose=true,
+                       order=false)
+
+    nchains=length(accept_ratio)
+    if drop_low_accept_ratio
+        chains2keep = Int[]
+        # this is a bit of a hack, but emcee seems to sometimes have
+        # chains which are stuck in oblivion.  These have a very low
+        # acceptance ratio, thus filter them out.
+        ma,sa = median(accept_ratio), std(accept_ratio)
+        verbose && println("Median accept ratio is $ma, standard deviation is $sa\n")
+        for nc=1:nchains
+            if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
+                verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
+                continue
+            end
+            push!(chains2keep, nc)
+        end
+    else
+        chains2keep = collect(1:nchains)
+    end
+
+    t = copy(thetas[chains2keep[1]])
+    append!.(Ref(t), thetas[chains2keep[2:end]])
+
+    l = copy(logdensities[chains2keep[1]])
+    append!.(Ref(l), logdensities[chains2keep[2:end]])
+
+    b = if blobs==nothing
+        nothing
+    else
+        b = copy(blobs[chains2keep])
+        append!.(Ref(b), blobs[chains2keep[2:end]])
+    end
+
+    if order # order such that early samples are early in thetas
+        nc = length(chains2keep)
+        ns = length(thetas[1])
+        perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
+        if blobs!=nothing
+            b = b[perm]
+        end
+        l = l[perm]
+        t = t[perm]
+    end
+    return t, mean(accept_ratio[chains2keep]), l, b
+end
 
 
 # ####################
