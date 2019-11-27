@@ -6,150 +6,15 @@
 #
 # https://pymc-devs.github.io/pymc/theory.html
 
-"""
-Take a sample from a distribution, specified by the inverse of its
-cdf using inverse transform sampling.
-
-Input:
-- invcdf -- inverse of the cumulative density function
-
-Output
-- one sample
-
-Notes:
-
-- only works for 1D
-- ApproxFun.jl can do this more generically.
-"""
-inverse_transform_sample(invcdf) = invcdf(rand())
 
 """
-Take a sample from a distribution, specified by a pdf, over a given
-range using rejection sampling.  Uses a uniform distribution as
-proposal distribution.
-
-Input:
-
-- pdf -- the pdf to sample (needn't be normalized)
-- domain -- the range over which to take samples (two vectors if multivariate)
-- max_density -- the maximal value of the distribution (or an upper bound estimate)
-- ntries=10^7 -- max number of Monte Carlo steps
-
-https://en.wikipedia.org/wiki/Rejection_sampling
-
-Note, ApproxFun can be used for 1D sampling too and may be much faster.
-"""
-function rejection_sample_unif(pdf, domain, max_density, ntries=10^7)
-    dr = (domain[2]-domain[1])
-    ndims = size(dr)
-    # use Uniform(range) as distribution g(x)
-    @inbounds for i=1:ntries
-        xt = dr.*rand_(ndims)+domain[1]
-        if pdf(xt)/max_density >= rand()
-            return xt
-        end
-    end
-    error("No sample found.")
-end
-rand_(::Tuple{}) = rand()
-rand_(i) = rand(i)
-
-"""
-Take a sample from a distribution using rejection sampling using an
-arbitrary proposal distribution.
-
-Input:
-- pdf -- pdf of distribution to sample from (needn't be normalized)
-- ppdf -- proposal distribution pdf.  The closer to `pdf` it is the more efficient it is.
-  Note:
-
-  - ppdf must be scaled such that ppdf(x)>=pdf(x) for all x in the range.
-  - ppdf needn't be normalized.
-
-- sample_ppdf -- draws a sample from ppdf
-- ntries=10^7 -- max number of Monte Carlo steps
-
-Output:
-- a sample from pdfX
-
-Note: this is not type stable in 0.4
-"""
-function rejection_sample(pdf, ppdf, sample_ppdf, ntries=10^7)
-    @inbounds for i=1:ntries
-        xt = sample_ppdf() # doing ::Float64 helps a tiny bit
-        if pdf(xt)/ppdf(xt) > rand()
-            return xt
-        end
-    end
-    error("No sample found.")
-end
-
-
-## MCMC samplers
-################
-
-## First a few helpers to write generic code:
-#######
-
-"Types used for dispatch depending on whether using a log-pdf or not."
-@compat abstract type PDFType end
-immutable LogPDF<:PDFType end
-comp2zero_nan(p, ::LogPDF) = p==-Inf || isnan(p)
-ratio(p1,p0, ::LogPDF) = p1-p0
-multiply(p1,p0, ::LogPDF) = p1+p0
-delog(p1, ::LogPDF) = exp(p1)
-
-immutable NonLogPDF<:PDFType end
-comp2zero_nan(p, ::NonLogPDF) = p==0 || isnan(p)
-ratio(p1,p0, ::NonLogPDF) = p1/p0
-multiply(p1,p0, ::NonLogPDF) = p1*p0
-delog(p1, ::NonLogPDF) = p1
-
-"""
-Create (output) storage array or vector, to be used with _setindex!
-`_make_storage(theta0, ni, nj)`
-
- - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin)
- - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
-"""
-function _make_storage end
-# Create no storage for nothings
-_make_storage(theta0::Void, args...) = nothing
-# Storing niter-nburnin values in a Vector or Array
-_make_storage(theta::Vector, niter, nburnin) = Array{eltype(theta)}(length(theta), niter-nburnin)
-_make_storage(theta, niter, nburnin) = Array{eltype(theta)}(niter-nburnin)
-# Storing (niter-nburnin)/nthin values in a Vector or Array
-_make_storage(theta0::Vector, niter, nburnin, nthin) = Array{eltype(theta0)}(length(theta0), (niter-nburnin)÷nthin)
-_make_storage(theta0, niter, nburnin, nthin) = Array{eltype(theta0)}((niter-nburnin)÷nthin)
-# Storing (niter-nburnin)/nthin x nchain values in 2D or 3D array
-_make_storage(theta0::Vector, niter, nburnin, nthin, nchains) = Array{eltype(theta0)}(length(theta0), (niter-nburnin)÷nthin, nchains)
-_make_storage(theta0, niter, nburnin, nthin, nchains) = Array{eltype(theta0)}((niter-nburnin)÷nthin, nchains)
-
-
-"""
-Used to be able to write code which is agnostic to vector-like or scalar-like parameters
-
-`_setindex!(samples, theta, n[, nc])`
-
-- if typeof(theta)==Vector then writes to a Matrix
-- if typeof(theta)!=Vector then writes to a Vector{Vector}
-
-Note that internally a copy (but not deepcopy) is made of the input.
-"""
-function _setindex! end
-# fallback for blobs of ::Void
-_setindex!(::Void, args...) = nothing
-_setindex!(samples::AbstractArray, theta::Vector, i, nc=1) = samples[:,i,nc]=theta
-_setindex!(samples::AbstractArray, theta, i, nc=1) = samples[i, nc]=copy(theta)
-
-
-"""
-Initializes storage and other bits for MCMCs.  Quite complicated to
-allow for all the different input combinations.
+Initializes storage and other bits for Metropolis-Hastings.
 
 If nchains==0 then assume that this MCMC cannot handle several chains.
+
+- Returns pdf which blobs.
 """
-function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!;
+function initialize_mh(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!;
                      make_SharedArray=false, ball_radius_halfing_steps=7)
 
     ntries = max(100,nburnin÷100) # how many tries per chain to find a IC with nonzero density
@@ -293,44 +158,27 @@ function _initialize(pdf_, theta0, niter, nburnin, logpdf, nchains, nthin, blob_
     end
 end
 
-
-# initialize storage:
-default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int) =
-    _make_storage(new_blob, niter, nburnin, nthin)
-default_blob_reduce!(new_blob, niter::Int, nburnin::Int, nthin::Int, nchains::Int) =
-    _make_storage(new_blob, niter, nburnin, nthin, nchains)
-# update storage-blob
-default_blob_reduce!(stored_blob, new_blob, ni::Int) = _setindex!(stored_blob, new_blob, ni)
-default_blob_reduce!(stored_blob, new_blob, ni::Int, nc::Int) = _setindex!(stored_blob, new_blob, ni, nc)
-# squash chains
-function default_blob_reduce!{T}(blobs::Array{T,3}, chains2keep)
-    t = blobs[:,:,chains2keep]
-    reshape(t, (size(t,1), size(t,2)*size(t,3)) )
-end
-default_blob_reduce!{T}(blobs::Array{T,2}, chains2keep) = blobs[:,chains2keep][:]
-default_blob_reduce!{T}(blobs::Array{T,1}, chains2keep) = blobs[chains2keep]
-
-## The serial MCMC samplers
-###########################
-
 """
-Metropolis sampler, the simplest MCMC. Can only be used with symmetric
+    metropolis(pdf, sample_ppdf, theta0;
+               niter=10^5,
+               nburnin=niter÷2,
+               nthin=1,
+               use_progress_meter=true)
+
+Metropolis sampler, the simplest MCMC method. Can only be used with symmetric
 proposal distributions (`ppdf`).
 
 Input:
 
-- pdf -- The probability density function to sample, defaults to
-         log-pdf.  (The likelihood*prior in a Bayesian setting) Returns
-         the density.
+- pdf -- The probability log-density function to sample.
 
          It can also returns an arbitrary blob of
          something as second output argument.
          `p, blob = pdf(theta)` where `theta` are the parameters.
-         Note that blob can use pre-allocated memory as it will be copied
-         (but not deepcopied) before storage.
 
 - sample_ppdf -- draws a sample for the proposal/jump distribution
-                 `sample_ppdf(theta)`
+                 `sample_ppdf(theta)`.  Needs to be symmetric:
+                 `sample_ppdf(theta1)==sample_ppdf(theta2)`
 - theta0 -- initial value of parameters (<:AbstractVector)
 
 Optional keyword input:
@@ -338,10 +186,6 @@ Optional keyword input:
 - niter -- number of steps to take (10^5)
 - nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
-- logpdf -- either true (default) (for log-likelihoods) or false
-- blob_reduce! -- a function which updates the stored-blob with a
-                     new blob, eg. to accommodate calculations made
-                     with OnlineStats.jl. See below section.
 - use_progress_meter=true : whether to show a progress meter
 
 Output:
@@ -351,163 +195,164 @@ Output:
   - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin)
 - blobs: anything else that the pdf-function returns as second argument
 - accept_ratio: ratio accepted to total steps
-- logposterior: the value of the log-posterior for each sample
-
-## Blobs and reduction:
-
-The reduce-function needs to have two methods: one to initialize the
-storage blob `new_blob -> storage_blob` and one to reduce a new blob
-into the storage blob `(stored_blob, new_blob, ni[, nc]) -> nothing`
-(updating stored_blob in-place).  `ni` is the iteration number, `nc`
-is the chain number, if applicable.
-
-
-
+- logdensities: the value of the log-density for each sample
 """
 function metropolis(pdf, sample_ppdf, theta0;
                     niter=10^5,
                     nburnin=niter÷2,
-                    logpdf=true,
                     nthin=1,
-                    blob_reduce! = default_blob_reduce!,
                     use_progress_meter=true,
                     )
     # initialize
-    nchains = 0
-    pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=false)
-
+    theta0 = deepcopy(theta0)
+    pdf_ = hasblob(pdf, theta0) ? pdf : t -> (pdf(t), nothing)
+    p0, blob0 = pdf_(theta0)
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
-    _metropolis!(p0, theta0, blob0, thetas, blobs, pdf_, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+    _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob(pdf, theta0))
 end
-function _metropolis!(p0, theta0, blob0, thetas, blobs, pdf, sample_ppdf, niter, nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
+    nsamples = (niter-nburnin) ÷ nthin
+
+    # initialize output arrays
+    thetas = typeof(theta0)[];
+    sizehint!(thetas, nsamples)
+    blobs = typeof(blob0)[];
+    hasblob && sizehint!(blobs, nsamples) # only provision if there are blobs
+    logdensities = typeof(p0)[];
+    sizehint!(logdensities, nsamples)
+
     naccept = 0
-    ni = 1
-    rng = (1-nburnin):(niter-nburnin)
     nn = 1
-    @inbounds for n=rng
+    for n=(1-nburnin):(niter-nburnin)
         # take a step:
         theta1 = sample_ppdf(theta0)
         p1, blob1 = pdf(theta1)
         # if p1/p0>rand() then accept:
-        if  delog(ratio(p1,p0, pdftype), pdftype)>rand() # ugly because of log & non-log pdfs
+        if  p1-p0 > log(rand())
             theta0 = theta1
             blob0 = blob1
             p0 = p1
             naccept += 1
         end
-        if rem(n,nthin)==0
-            prog!=nothing && ProgressMeter.next!(prog; showvalues = [(:accept_ratio, signif(naccept/nn,3)), (:burnin_phase, n<=0)])
-            if n>0
-                _setindex!(thetas, theta0, ni)
-                blob_reduce!(blobs, blob0, ni)
-                logposts[ni] = p0
-                ni +=1
+        # storage
+        if rem(n, nthin)==0
+            prog!=nothing && ProgressMeter.next!(prog; showvalues =
+                                                 [(:accept_ratio, round(naccept/nn, sigdigits=3)),
+                                                  (:burnin_phase, n<=0)])
+            if n>0 # after burnin
+                push!(thetas, theta0)
+                hasblob && push!(blobs, blob0)
+                push!(logdensities, p0)
             end
         end
         nn +=1 # number of steps
-        if n==0 # reset for non-burnin phase
+        if n==0 # reset counters at end of burnin phase
             naccept=0
             nn=1
         end
     end
     accept_ratio = naccept/(niter-nburnin)
-    return thetas, accept_ratio, blobs, logposts
+    return thetas, accept_ratio, blobs, logdensities
 end
 
-## TODO:
-# - Metropolis-Hastings
-# - block-wise
-
 ####
-# The MC hammer: emcee implementation
+# The affine invariant MCMC sampler, aka MC hammer in its
+# python emcee implementation
 ###
 # https://github.com/dfm/emcee
 
 """
-The emcee MCMC sampler: https://github.com/dfm/emcee
+    emcee(pdf, theta0s;
+          nchains=10^2,
+          niter=10^5,
+          nburnin=niter÷2,
+          nthin=1,
+          a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
+          use_progress_meter=true,
+          ball_radius_halfing_steps=7)
 
 Input:
 
-- pdf -- The probability density function to sample, defaults to
-         log-pdf.  The likelihood*prior in a Bayesian setting.
-         `pdf` returns the density.
+- pdf -- The probability log-density function to sample.
 
-         The pdf can also returns an arbitrary blob of
-         something.
+         The pdf can also returns an arbitrary blob of something.
          `p, blob = pdf(theta)` where `theta` are the parameters.
-         Note that blob can use pre-allocated memory as it will be copied
-         (but not deepcopied) before storage.
+- theta0s -- initial parameters, a Vector of length of the number of chains.
+             Consider creating them with `make_theta0s(theta0, ballradius)`
 
-- theta0 -- initial parameters.
-  - If a tuple: choose random thetas around theta0[1] (<:AbstractVector) in a ball of radius theta0[2]
-  - If a vector of vectors: use as starting points for an equal number of chains.
+Note that theta0s[1] need to support `.+`, `.*`, and `length`.
 
 Optional key-word input:
 
-- nchain -- number of chain to use (10^3).  If theta0 is vector of vectors, then set accordingly.
 - niter -- total number of steps to take (10^5) (==total number of posterior evaluations).
 - nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
-- logpdf -- either true  (default) (for log-likelihoods) or false
 - use_progress_meter=true : whether to show a progress meter
-- ball_radius_halfing_steps=7 : if no initial theta can be round within the ball, its radius will be halved
-                                and tried again; repeatedly for the specified amount of halfing-steps.
 
 Output:
 
-- samples:
-  - if typeof(theta0)==Vector then Array{eltype(theta0)}(length(theta0), niter-nburnin, nchains)
-  - if typeof(theta0)!=Vector then Array{typeof(theta0)}(niter-nburnin, nchains)
-- accept_ratio: ratio accepted to total steps
+- samples: of type & size `Matrix{typeof(theta0)}(niter-nburnin, nchains)`
+- accept_ratio: ratio of accepted to total steps
 - blobs: anything else that the pdf-function returns as second argument
-- logposterior: the value of the log-posterior for each sample
+- logdensities: the value of the log-density for each sample
 
-Note: use `squash_chains` to concatenate all chains into one chain.
+Note: use `squash_chains(samples)` to concatenate all chains into one chain.
 
-Reference: emcee: The MCMC hammer, Foreman-Mackey et al. 2013
+Reference:
+sqrt(var(naccept))
+- Goodman, Jonathan, and Jonathan Weare, 2010
+  http://dx.doi.org/10.2140/camcos.2010.5.65
+- Foreman-Mackey et al. 2013, emcee: The MCMC hammer,
+  https://github.com/dfm/emcee
+
 
 Example
 
-    thetas, accept_ratio, _, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+    thetas, accept_ratio, _, logposteriors = emcee(x->sum(-x.^2),
+    ([1.0,2, 5], 0.1))
 """
-function emcee(pdf, theta0;
-               nchains=10^2,
+function emcee(pdf, theta0s;
                niter=10^5,
                nburnin=niter÷2,
-               logpdf=true,
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-               blob_reduce! =default_blob_reduce!, # note the space after `!`
-               use_progress_meter=true,
-               ball_radius_halfing_steps=7
+               use_progress_meter=true
                )
     @assert a_scale>1
-    niter_emcee = niter ÷ nchains
-    nburnin_emcee = nburnin ÷ nchains
-
-    # initialize
-    pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, theta0, niter_emcee, nburnin_emcee, logpdf, nchains, nthin, blob_reduce!;
-                    make_SharedArray=false, ball_radius_halfing_steps=ball_radius_halfing_steps)
+    nchains = length(theta0s)
+    niter_chain = niter ÷ nchains
+    nburnin_chain = nburnin ÷ nchains
     @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
-    # initialize progress meter (type-unstable)
-    prog = use_progress_meter ? Progress(length((1-nburnin_emcee):(niter_emcee-nburnin_emcee)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
+    # initialize
+    theta0s = deepcopy(theta0s)
+    pdf_ = hasblob(pdf, theta0s[1]) ? pdf : t -> (pdf(t), nothing)
+    tmp = pdf_.(theta0s)
+    p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
+    @assert eltype(p0s) <: AbstractFloat "The log-density needs to return a AbstractFloat"
+
+    # initialize progress meter
+    prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
-    _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf_, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
+    _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
 end
 
-function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_emcee, nchains, nthin, pdftype, a_scale, blob_reduce!, prog, logposts)
+function _emcee(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
+    # initialize output
+    thetas = [eltype(theta0s)[] for i=1:nchains]
+    sizehint!.(thetas, niter_chain)
+    blobs =  [eltype(blob0s)[] for i=1:nchains]
+    hasblob && sizehint!.(blobs, niter_chain)
+    logdensities =  [eltype(p0s)[] for i=1:nchains]
+    sizehint!.(logdensities, niter_chain)
+
     # initialization and work arrays:
     naccept = zeros(Int, nchains)
-    ni = ones(Int, nchains)
     N = length(theta0s[1])
     nn = 1
-    rng = (1-nburnin_emcee):(niter_emcee-nburnin_emcee)
-    @inbounds for n = rng
+    for n in (1-nburnin_chain):(niter_chain-nburnin_chain)
         for nc = 1:nchains
             # draw a random other chain
             no = rand(1:nchains-1)
@@ -515,44 +360,47 @@ function _emcee!(p0s, theta0s, blob0s, thetas, blobs, pdf, niter_emcee, nburnin_
             # sample g (eq. 10)
             z = sample_g(a_scale)
 
-            # sample a new theta with the stretch move:
-            theta1 = theta0s[no] + z*(theta0s[nc]-theta0s[no]) # eq. 7
+            # sample a new theta with the stretch move (eq. 7):
+            theta1 = theta0s[no] .+ z .* (theta0s[nc] .- theta0s[no])
             # and calculate the theta1 density:
             p1, blob1 = pdf(theta1)
 
-            # if z^(N-1)*p1/p0>rand() then accept:
-            if z^(N-1)*delog(ratio(p1,p0s[nc], pdftype), pdftype)>=rand() # ugly because of log & non-log pdfs
+            # if z^(N-1)*p1/p0>rand() then accept the new theta:
+            if (N-1)*log(z) + p1 - p0s[nc] >= log(rand())
                 theta0s[nc] = theta1
                 p0s[nc] = p1
 
                 blob0s[nc] = blob1
                 naccept[nc] += 1
             end
-            # store theta after burn-in
-            if  n>0 && rem(n,nthin)==0
-                _setindex!(thetas, theta0s[nc], ni[nc], nc)
-                blob_reduce!(blobs, blob0s[nc], ni[nc], nc)
-                logposts[ni[nc], nc] = p0s[nc]
-                ni[nc] +=1
-            end
-        end # for nc =1:nchains
-        if n==0
-            naccept = zeros(naccept)
-            nn=1
-        end
-        macc = mean(naccept)
-        sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
-        outl = sum(abs.(naccept.-macc).>2*sacc)
-        prog!=nothing && ProgressMeter.next!(prog;
-                                             showvalues = [(:accept_ratio_mean, signif(macc/nn,3)),
-                                                           (:accept_ratio_std, signif(sacc/nn,3)),
-                                                           (:accept_ratio_outliers, outl),
-                                                           (:burnin_phase, n<=0)])
-        nn +=1
-    end # for n=(1-nburnin_emcee):(niter_emcee-nburnin_emcee)
 
-    accept_ratio = [na/(niter_emcee-nburnin_emcee) for na in naccept]
-    return thetas, accept_ratio, blobs, logposts
+            if n>0 && rem(n,nthin)==0 # store theta after burn-in
+                push!(thetas[nc], theta0s[nc])
+                hasblob && push!(blobs[nc], blob0s[nc])
+                push!(logdensities[nc], p0s[nc])
+            end
+        end # for NC =1:nchains
+
+        # update progress meter only every so often
+        if rem(n,nthin)==0
+            macc = mean(naccept)
+            sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
+            outl = sum(abs.(naccept.-macc).>2*sacc)
+            prog!=nothing && ProgressMeter.next!(prog;
+                                                 showvalues = [(:accept_ratio_mean, round(macc/nn,sigdigits=3)),
+                                                               (:accept_ratio_std, round(sacc/nn,sigdigits=3)),
+                                                           (:accept_ratio_outliers, outl),
+                                                               (:burnin_phase, n<=0)])
+        end
+        if n==0 # reset after burnin
+            naccept = fill!(naccept,0)
+            nn = 1
+        end
+        nn +=1
+    end # for n=(1-nburnin_chain):(niter_chain-nburnin_chain)
+
+    accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
+    return thetas, accept_ratio, blobs, logdensities
 end
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
@@ -564,360 +412,454 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
-"""
-    evaluate_convergence(thetas1, thetas2; indices=1:size(thetas)[1], walkernr=1)
+function emceep(pdf, theta0s;
+               niter=10^5,
+               nburnin=niter÷2,
+               nthin=1,
+               a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
+               use_progress_meter=true
+               )
+    @assert a_scale>1
+    nchains = length(theta0s)
+    @assert iseven(nchains) "Use an even number of chains."
+    niter_chain = niter ÷ nchains
+    nburnin_chain = nburnin ÷ nchains
+    @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
 
-Evaluates:
-- R̂ (potential scale reduction): should be <1.1
-- total effective sample size of all chains combined, and
-- the average thinning factor
-
-See Gelman etal 2014, page 281-287
-
-Note that https://dfm.io/posts/autocorr/ says "you should not compute
-the G–R statistic using multiple chains in the same emcee ensemble because
-the chains are not independent!"  Thus this needs input from two separate emcee runs.
-
-Example
-
-    thetas1, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
-    thetas2, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
-    Rhat, sample_size, nthin = evaluate_convergence(thetas1, thetas2)
-"""
-function evaluate_convergence(thetas1, thetas2; indices=1:size(thetas1)[1],
-                              walkernr=1)
-    @assert size(thetas1)==size(thetas2)
-    Rs = Float64[]
-    sample_size = Float64[]
-    split = size(thetas1)[2]÷2
-    for i in indices
-        chains = [thetas1[i,1:split,walkernr], thetas2[i,split+1:2*split,walkernr]]
-        push!(Rs, MCMCDiagnostics.potential_scale_reduction(chains...))
-        push!(sample_size, sum(MCMCDiagnostics.effective_sample_size.(chains)))
-    end
-    nwalkers = length(size(thetas1))==3 ? size(thetas1)[3] : 1
-    nthin = size(thetas1)[2]*nwalkers/mean(sample_size)
-    return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
-end
-
-
-"""
-    int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
-
-Returns:
-- Estimated integrated autocorrelation time τ (in number of steps) for each theta
-- Indication whether the estimate has converged as ratio between chain-length and
-  τ.  Should probably be larger than 50 or 100.  (again for each theta)
-
-τ gives the factor by which the variance of the calculated expectation of y
-is larger than for independent samples.
-
-In other words:
-- τ is the number of steps that are needed before the chain "forgets" where it started.
-- N/τ is the effective number of samples (N is total number of samples)
-
-This means that, if you can estimate τ, then you can estimate the number
-of samples that you need to generate to reduce the relative error on your
-target integral to (say) a few percent.
-
-NOTE: the employed algorithm is not that great at estimating τ
-with short chain lengths.  To get good estimates a chain length greater than
-50τ is recommended (which may well be longer than what you actually need).
-By default this function will warn if the estimate is likely not converged.
-
-Optionals:
-- c -- window width to search when calculating autocor (5)
-- warn -- warn if chain length is too small for an accurate τ estimate (true)
-
-Notes:
-- It is important to remember that f depends on the specific
-  function f(θ). This means that there isn't just one integrated
-  autocorrelation time for a given Markov chain. Instead, you must
-  compute a different τ for any integral you estimate using the samples.
-- works equally with thinned an non-thinned chains
-- whilst it is not recommended by the referenced work, it is probably ok
-  to apply this also to a squashed chain.  Then run it as:
-  `int_acorr(reshape(thetas, (size(thetas,1), size(thetas,2), 1))`
-
-Ref:
-https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
-Adapted from various bits of the code there.
-"""
-function int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
-    @assert c>1
-    sz = size(thetas)
-    ntheta, nsamples, nchains = size(thetas)
-    out = Float64[]
-    for n = 1:ntheta
-        # mean autocorr of all chains:
-        rho = zeros(nsamples÷2)
-        for cc = 1:nchains
-            rho .+= acor1d(thetas[n,:,cc])
-        end
-        rho ./= nchains
-        # the -1 correct see https://github.com/dfm/emcee/issues/267#issuecomment-477556521
-        taus = 2 * cumsum(rho) - 1
-        window = auto_window(taus, c)
-        push!(out, taus[window])
-    end
-    converged = nsamples./out # probably converged if > 50
-    if warn && any(converged.<warnat)
-        Base.warn("Estimate of integrated autocorrelation likely not accurate!")
-    end
-    if any(isnan.(out)) || any(isnan.(converged))
-        # set both to -1 in this case (a hack)
-        out = out*false - 1
-        converged = converged*false -1
-    end
-    return out, converged
-end
-
-"""
-    eff_samples(thetas::Array{<:Any,3}, c=5)
-
-Return scalars:
-- total mean number of effective samples
-- suggested thinning step (essentially equal to the mean τ)
-- mean τ-convergence estimate  (as ratio chain-length and τ,
-  should be greater than 50 or 100 or so)
-Return vectors for each θ component
-- total number of effective samples
-- τ auto correlation steps
-- per chain estimates whether τ-estimates are converged
-
-(the last two output are pass on from int_acorr)
-
-Example:
-
-    Neff, τ, conv, Neffs, τs, convs = eff_samples(theta)
-"""
-function eff_samples(thetas::Array{<:Any,3}; c=5)
-    acorr, converged = int_acorr(thetas, c=c, warn=false)
-    ns = size(thetas,2)./acorr * size(thetas,3)
-    return (round.(Int, mean(ns)), round.(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), mean(converged),
-            round.(Int, ns), acorr, converged)
-end
-
-"""
-    samples_vs_tau(thetas::Array{<:Any,3})
-
-Returns samples vs τ as is plotted in
-https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
-
-To plot do:
-
-    using Plots
-    N,taus = KissMCMC.samples_vs_tau(thetas);
-    plot(N,taus)
-    # additionally plot the N/50 line
-    plot!(N, N/50, ls=:dash, c=:black)
-"""
-function samples_vs_tau(thetas::Array{<:Any,3})
-    N = round(Int, logspace(2,log10(size(thetas,2)), 10))
-    nthin = 1
-
-    taus = []
-    # converged = []
-    NN = []
-    for n in N
-        if length(1:nthin:n)>3
-            tau, conv = KissMCMC.int_acorr(thetas[:, 1:nthin:n, :], warn=false)
-            push!(taus, tau)
-            # push!(converged, conv)
-            push!(NN,length(1:nthin:n))
-        end
-    end
-    taus = hcat(taus...)'
-    return NN, taus
-end
-
-"""
-    error_of_estimated_mean(thetas::Array{<:Any,3},
-                            Neff = eff_samples(thetas)[4])
-
-Calculates the error in the estimated mean of each theta.
-
-Return estimates of:
-- mean(theta)
-- error of mean
-- std(theta)
-
-Ref:
-15.4.3 in https://mc-stan.org/docs/2_18/reference-manual/effective-sample-size-section.html
-"""
-function error_of_estimated_mean(thetas::Array{<:Any,3},
-                                 Neff = eff_samples(thetas)[4])
-    mtheta = mean(mean(thetas,2),3)[:]
-    stheta = std(std(thetas,2),3)[:]
-    err_of_mean = stheta./sqrt(Neff)
-    return mtheta, err_of_mean, stheta
-end
-
-## helper functions
-import Base.DFT
-function acor1d(x::AbstractVector, norm=true)
-    # TODO for speed:
-    #n = DFT.nextprod([2,3,4,5], length(x))
-
-    # Compute the FFT and then (from that) the auto-correlation function
-    f = DFT.fft(x - mean(x))
-    acf = real.(DFT.ifft(f .* conj(f)))# TODO [1:length(x)]
-    acf ./= 4*length(x)
-
-    # Optionally normalize
-    if norm
-        acf ./= acf[1]
-    end
-
-    return acf[1:length(acf)÷2]
-end
-
-"""
-    auto_window(taus, c)
-
-Gives the ±window over which the autocorr should be integrated
-to get a good estimate.  `c` defaults to 5.
-"""
-function auto_window(taus, c)
-    for (i,t) in enumerate(taus)
-        i >= c*t && return i
-    end
-    return length(taus)-1
-end
-
-"""
-    squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
-                                                                 drop_low_accept_ratio=false,
-                                                                 drop_fact=1,
-                                                                 blob_reduce! =default_blob_reduce!,
-                                                                 verbose=true,
-                                                                 order=false
-                                                                 )
-Puts the samples of all chains into one vector.
-
-This can also drop chains which have a low accept ratio (this can happen with
-emcee), by setting drop_low_accept_ratio (Although whether it is wise to
-do so is another question).  drop_fact -> increase to drop more chains.
-
-Returns:
-- theta
-- mean(accept_ratio[chains2keep])
-- blobs
-- log-posteriors
-- reshape_revert: reshape(thetas_out, reshape_revert...) will put it back into the chains.
-"""
-function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
-                                                                 drop_low_accept_ratio=false,
-                                                                 drop_fact=2,
-                                                                 blob_reduce! =default_blob_reduce!,
-                                                                 verbose=true,
-                                                                 order=false
-                                                                 )
-    nchains=length(accept_ratio)
-    if drop_low_accept_ratio
-        chains2keep = Int[]
-        # this is a bit of a hack, but emcee seems to sometimes have
-        # chains which are stuck in oblivion.  These have a very low
-        # acceptance ratio, thus filter them out.
-        ma,sa = median(accept_ratio), std(accept_ratio)
-        verbose && println("Median accept ratio is $ma, standard deviation is $sa\n")
-        for nc=1:nchains
-            if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
-                verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
-                continue
-            end
-            push!(chains2keep, nc)
-        end
-    else
-        chains2keep = collect(1:nchains) # collect to make chains2keep::Vector{Int}
-    end
-
-    # TODO: below creates too many temporary arrays
-    if ndims(thetas)==3
-        t = thetas[:,:,chains2keep]
-        reshape_revert = size(t)
-        t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
-    else
-        t = thetas[:,chains2keep]
-        reshape_revert = size(t)
-        t = t[:]
-    end
-    if logposts==nothing
-        l = nothing
-    else
-        l = logposts[:,chains2keep][:]
-    end
-    if blobs==nothing
-        b = nothing
-    else
-        b = blob_reduce!(blobs, chains2keep)
-    end
-    if order # order such that early samples are early in thetas
-        nc = length(chains2keep)
-        ns = size(thetas,1)
-        perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
-        if blobs!=nothing
-            b = b[perm]
-        end
-        if logposts!=nothing
-            l = l[perm]
-        end
-        if ndims(thetas)==3
-            t = t[:,perm]
-        else
-            t = t[perm]
-        end
-        reshape_revert = nothing # not possible to reorder
-    end
-    return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
-end
-
-
-####################
-"""
-         retrace_samples(pdf, thetas_in;
-                         logpdf=true,
-                         blob_reduce! = default_blob_reduce!,
-                         use_progress_meter=true)
-
-This function allows to re-run the pdf for some, given thetas (`thetas_in`).  This is probably
-a bit niche, but hey.
-
-This I use when only sampling the prior but then want to get some function-blob evaluations.
-That way the evaluation of an expensive forward function can be avoided.
-"""
-function retrace_samples(pdf, thetas_in;
-                         logpdf=true,
-                         blob_reduce! = default_blob_reduce!,
-                         use_progress_meter=true,
-                         )
     # initialize
-    nchains = 0
-    niter = size(thetas_in,2)
-    nburnin = 0
-    nthin = 1
-    pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
-        _initialize(pdf, thetas_in[:,1], niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=false)
+    pdf_ = hasblob(pdf, theta0s[1]) ? pdf : t -> (pdf(t), nothing)
+    tmp = pdf_.(theta0s)
+    p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
 
-    prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Retracing samples, niter=$niter: ", 25) : nothing
-
-    # run
-    _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf_, niter,
-                      nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+    # initialize progress meter
+    prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
+    # do the MCMC
+    _emceep(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
 end
-function _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf, niter,
-                           nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
-    @inbounds for ni=1:size(thetas_in,2)
-        theta = thetas_in[:,ni]
-        # take a step:
-        p, blob = pdf(theta)
 
-        _setindex!(thetas, theta, ni)
-        blob_reduce!(blobs, blob, ni)
-        logposts[ni] = p
+function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
+    # initialize output
+    thetas = [eltype(theta0s)[] for i=1:nchains]
+    sizehint!.(thetas, niter_chain)
+    blobs =  [eltype(blob0s)[] for i=1:nchains]
+    hasblob && sizehint!.(blobs, niter_chain)
+    logdensities =  [eltype(p0s)[] for i=1:nchains]
+    sizehint!.(logdensities, niter_chain)
 
-        prog!=nothing && ProgressMeter.next!(prog)
-    end
-    accept_ratio = -1
-    return thetas, accept_ratio, blobs, logposts
+    # initialization and work arrays:
+    naccept = zeros(Int, nchains)
+    N = length(theta0s[1])
+    nn = 1
+    for n in (1-nburnin_chain):(niter_chain-nburnin_chain)
+        for batch = 1:2
+            ncs, ncos = circshift(SVector(1:nchains÷2, nchains÷2+1:nchains), batch-1)
+            for nc in ncs
+                # draw a random other chain
+                no = rand(ncos)
+                # sample g (eq. 10)
+                z = sample_g(a_scale)
+
+                # sample a new theta with the stretch move (eq. 7):
+                theta1 = theta0s[no] .+ z .* (theta0s[nc] .- theta0s[no])
+                # and calculate the theta1 density:
+                p1, blob1 = pdf(theta1)
+
+                # if z^(N-1)*p1/p0>rand() then accept:
+                if (N-1)*log(z) + p1 - p0s[nc] >= log(rand())
+                    theta0s[nc] = theta1
+                    p0s[nc] = p1
+
+                    blob0s[nc] = blob1
+                    naccept[nc] += 1
+                end
+
+                    if n>0 && rem(n,nthin)==0 # store theta after burn-in
+                        push!(thetas[nc], theta0s[nc])
+                        hasblob && push!(blobs[nc], blob0s[nc])
+                        push!(logdensities[nc], p0s[nc])
+                    end
+
+            end # for nc =1:ncs
+        end # batch = 1:2
+        if rem(n,nthin)==0
+            macc = mean(naccept)
+            sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
+            outl = sum(abs.(naccept.-macc).>2*sacc)
+            prog!=nothing && ProgressMeter.next!(prog;
+                                                 showvalues = [(:accept_ratio_mean, round(macc/nn,sigdigits=3)),
+                                                               (:accept_ratio_std, round(sacc/nn,sigdigits=3)),
+                                                               (:accept_ratio_outliers, outl),
+                                                               (:burnin_phase, n<=0)])
+        end
+        if n==0 # reset after burnin
+            naccept = fill!(naccept,0)
+            nn = 1
+        end
+        nn +=1
+    end # for n=(1-nburnin_chain):(niter_chain-nburnin_chain)
+
+    accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
+    return thetas, accept_ratio, blobs, logdensities
 end
+
+
+
+# """
+#     evaluate_convergence(thetas1, thetas2; indices=1:size(thetas)[1], walkernr=1)
+
+# Evaluates:
+# - R̂ (potential scale reduction): should be <1.1
+# - total effective sample size of all chains combined, and
+# - the average thinning factor
+
+# See Gelman etal 2014, page 281-287
+
+# Note that https://dfm.io/posts/autocorr/ says "you should not compute
+# the G–R statistic using multiple chains in the same emcee ensemble because
+# the chains are not independent!"  Thus this needs input from two separate emcee runs.
+
+# Example
+
+#     thetas1, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+#     thetas2, _, accept_ratio, logposteriors = emcee(x->sum(-x.^2), ([1.0,2, 5], 0.1))
+#     Rhat, sample_size, nthin = evaluate_convergence(thetas1, thetas2)
+# """
+# function evaluate_convergence(thetas... ; indices=1:size(thetas[1])[1],
+#                               walkernr=1)
+#     # @show [size(t) for t in thetas]
+#     # @assert all([size(t)==size(thetas[1]) for t in thetas])
+#     Rs = Float64[]
+#     sample_size = Float64[]
+#     split = size(thetas[1])[2]÷2
+#     for i in indices
+#         #chains = [thetas1[i,1:split,walkernr], thetas2[i,split+1:2*split,walkernr]]
+#         chains = [t[i,1:split,walkernr] for t in thetas]
+#         push!(Rs, MCMCDiagnostics.potential_scale_reduction(chains...))
+#         push!(sample_size, sum(MCMCDiagnostics.effective_sample_size.(chains)))
+#     end
+#     nwalkers = length(size(thetas[1]))==3 ? size(thetas[1])[3] : 1
+#     nthin = size(thetas[1])[2]*nwalkers/mean(sample_size)
+#     return Rs, sample_size, isnan(nthin) ? -1 : round(Int, nthin)
+# end
+
+
+# """
+#     int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
+
+# Returns:
+# - Estimated integrated autocorrelation time τ (in number of steps) for each theta
+# - Indication whether the estimate has converged as ratio between chain-length and
+#   τ.  Should probably be larger than 50 or 100.  (again for each theta)
+
+# τ gives the factor by which the variance of the calculated expectation of y
+# is larger than for independent samples.
+
+# In other words:
+# - τ is the number of steps that are needed before the chain "forgets" where it started.
+# - N/τ is the effective number of samples (N is total number of samples)
+
+# This means that, if you can estimate τ, then you can estimate the number
+# of samples that you need to generate to reduce the relative error on your
+# target integral to (say) a few percent.
+
+# NOTE: the employed algorithm is not that great at estimating τ
+# with short chain lengths.  To get good estimates a chain length greater than
+# 50τ is recommended (which may well be longer than what you actually need).
+# By default this function will warn if the estimate is likely not converged.
+
+# Optionals:
+# - c -- window width to search when calculating autocor (5)
+# - warn -- warn if chain length is too small for an accurate τ estimate (true)
+
+# Notes:
+# - It is important to remember that f depends on the specific
+#   function f(θ). This means that there isn't just one integrated
+#   autocorrelation time for a given Markov chain. Instead, you must
+#   compute a different τ for any integral you estimate using the samples.
+# - works equally with thinned an non-thinned chains
+# - whilst it is not recommended by the referenced work, it is probably ok
+#   to apply this also to a squashed chain.  Then run it as:
+#   `int_acorr(reshape(thetas, (size(thetas,1), size(thetas,2), 1))`
+
+# Ref:
+# https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
+# Adapted from various bits of the code there.
+# """
+# function int_acorr(thetas::Array{<:Any,3}; c=5, warn=true, warnat=50)
+#     @assert c>1
+#     sz = size(thetas)
+#     ntheta, nsamples, nchains = size(thetas)
+#     out = Float64[]
+#     for n = 1:ntheta
+#         # mean autocorr of all chains:
+#         rho = zeros(nsamples÷2)
+#         for cc = 1:nchains
+#             rho .+= acor1d(thetas[n,:,cc])
+#         end
+#         rho ./= nchains
+#         # the -1 correct see https://github.com/dfm/emcee/issues/267#issuecomment-477556521
+#         taus = 2 * cumsum(rho) - 1
+#         window = auto_window(taus, c)
+#         push!(out, taus[window])
+#     end
+#     converged = nsamples./out # probably converged if > 50
+#     if warn && any(converged.<warnat)
+#         Base.warn("Estimate of integrated autocorrelation likely not accurate!")
+#     end
+#     if any(isnan.(out)) || any(isnan.(converged))
+#         # set both to -1 in this case (a hack)
+#         out = out*false - 1
+#         converged = converged*false -1
+#     end
+#     return out, converged
+# end
+
+# """
+#     eff_samples(thetas::Array{<:Any,3}, c=5)
+
+# Return scalars:
+# - total mean number of effective samples
+# - suggested thinning step (essentially equal to the mean τ)
+# - mean τ-convergence estimate  (as ratio chain-length and τ,
+#   should be greater than 50 or 100 or so)
+# Return vectors for each θ component
+# - total number of effective samples
+# - τ auto correlation steps
+# - per chain estimates whether τ-estimates are converged
+
+# (the last two output are pass on from int_acorr)
+
+# Example:
+
+#     Neff, τ, conv, Neffs, τs, convs = eff_samples(theta)
+# """
+# function eff_samples(thetas::Array{<:Any,3}; c=5)
+#     acorr, converged = int_acorr(thetas, c=c, warn=false)
+#     ns = size(thetas,2)./acorr * size(thetas,3)
+#     return (round.(Int, mean(ns)), round.(Int, size(thetas,2)*size(thetas,3)÷mean(ns)), mean(converged),
+#             round.(Int, ns), acorr, converged)
+# end
+
+# """
+#     samples_vs_tau(thetas::Array{<:Any,3})
+
+# Returns samples vs τ as is plotted in
+# https://emcee.readthedocs.io/en/latest/tutorials/autocorr/
+
+# To plot do:
+
+#     using Plots
+#     N,taus = KissMCMC.samples_vs_tau(thetas);
+#     plot(N,taus)
+#     # additionally plot the N/50 line
+#     plot!(N, N/50, ls=:dash, c=:black)
+# """
+# function samples_vs_tau(thetas::Array{<:Any,3})
+#     N = round(Int, logspace(2,log10(size(thetas,2)), 10))
+#     nthin = 1
+
+#     taus = []
+#     # converged = []
+#     NN = []
+#     for n in N
+#         if length(1:nthin:n)>3
+#             tau, conv = KissMCMC.int_acorr(thetas[:, 1:nthin:n, :], warn=false)
+#             push!(taus, tau)
+#             # push!(converged, conv)
+#             push!(NN,length(1:nthin:n))
+#         end
+#     end
+#     taus = hcat(taus...)'
+#     return NN, taus
+# end
+
+# """
+#     error_of_estimated_mean(thetas::Array{<:Any,3},
+#                             Neff = eff_samples(thetas)[4])
+
+# Calculates the error in the estimated mean of each theta.
+
+# Return estimates of:
+# - mean(theta)
+# - error of mean
+# - std(theta)
+
+# Ref:
+# 15.4.3 in https://mc-stan.org/docs/2_18/reference-manual/effective-sample-size-section.html
+# """
+# function error_of_estimated_mean(thetas::Array{<:Any,3},
+#                                  Neff = eff_samples(thetas)[4])
+#     mtheta = mean(mean(thetas,2),3)[:]
+#     stheta = std(std(thetas,2),3)[:]
+#     err_of_mean = stheta./sqrt(Neff)
+#     return mtheta, err_of_mean, stheta
+# end
+
+# ## helper functions
+# import Base.DFT
+# function acor1d(x::AbstractVector, norm=true)
+#     # TODO for speed:
+#     #n = DFT.nextprod([2,3,4,5], length(x))
+
+#     # Compute the FFT and then (from that) the auto-correlation function
+#     f = DFT.fft(x - mean(x))
+#     acf = real.(DFT.ifft(f .* conj(f)))# TODO [1:length(x)]
+#     acf ./= 4*length(x)
+
+#     # Optionally normalize
+#     if norm
+#         acf ./= acf[1]
+#     end
+
+#     return acf[1:length(acf)÷2]
+# end
+
+# """
+#     auto_window(taus, c)
+
+# Gives the ±window over which the autocorr should be integrated
+# to get a good estimate.  `c` defaults to 5.
+# """
+# function auto_window(taus, c)
+#     for (i,t) in enumerate(taus)
+#         i >= c*t && return i
+#     end
+#     return length(taus)-1
+# end
+
+# """
+#     squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
+#                                                                  drop_low_accept_ratio=false,
+#                                                                  drop_fact=1,
+#                                                                  blob_reduce! =default_blob_reduce!,
+#                                                                  verbose=true,
+#                                                                  order=false
+#                                                                  )
+# Puts the samples of all chains into one vector.
+
+# This can also drop chains which have a low accept ratio (this can happen with
+# emcee), by setting drop_low_accept_ratio (Although whether it is wise to
+# do so is another question).  drop_fact -> increase to drop more chains.
+
+# Returns:
+# - theta
+# - mean(accept_ratio[chains2keep])
+# - blobs
+# - log-posteriors
+# - reshape_revert: reshape(thetas_out, reshape_revert...) will put it back into the chains.
+# """
+# function squash_chains(thetas, accept_ratio=zeros(size(thetas)[end]), blobs=nothing, logposts=nothing;
+#                                                                  drop_low_accept_ratio=false,
+#                                                                  drop_fact=2,
+#                                                                  blob_reduce! =default_blob_reduce!,
+#                                                                  verbose=true,
+#                                                                  order=false
+#                                                                  )
+#     nchains=length(accept_ratio)
+#     if drop_low_accept_ratio
+#         chains2keep = Int[]
+#         # this is a bit of a hack, but emcee seems to sometimes have
+#         # chains which are stuck in oblivion.  These have a very low
+#         # acceptance ratio, thus filter them out.
+#         ma,sa = median(accept_ratio), std(accept_ratio)
+#         verbose && println("Median accept ratio is $ma, standard deviation is $sa\n")
+#         for nc=1:nchains
+#             if accept_ratio[nc]<=ma-drop_fact*sa # this 1 is heuristic
+#                 verbose && println("Dropping chain $nc with low accept ratio $(accept_ratio[nc])")
+#                 continue
+#             end
+#             push!(chains2keep, nc)
+#         end
+#     else
+#         chains2keep = collect(1:nchains) # collect to make chains2keep::Vector{Int}
+#     end
+
+#     # TODO: below creates too many temporary arrays
+#     if ndims(thetas)==3
+#         t = thetas[:,:,chains2keep]
+#         reshape_revert = size(t)
+#         t = reshape(t, (size(t,1), size(t,2)*size(t,3)) )
+#     else
+#         t = thetas[:,chains2keep]
+#         reshape_revert = size(t)
+#         t = t[:]
+#     end
+#     if logposts==nothing
+#         l = nothing
+#     else
+#         l = logposts[:,chains2keep][:]
+#     end
+#     if blobs==nothing
+#         b = nothing
+#     else
+#         b = blob_reduce!(blobs, chains2keep)
+#     end
+#     if order # order such that early samples are early in thetas
+#         nc = length(chains2keep)
+#         ns = size(thetas,1)
+#         perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
+#         if blobs!=nothing
+#             b = b[perm]
+#         end
+#         if logposts!=nothing
+#             l = l[perm]
+#         end
+#         if ndims(thetas)==3
+#             t = t[:,perm]
+#         else
+#             t = t[perm]
+#         end
+#         reshape_revert = nothing # not possible to reorder
+#     end
+#     return t, mean(accept_ratio[chains2keep]), b, l, reshape_revert
+# end
+
+
+# ####################
+# """
+#          retrace_samples(pdf, thetas_in;
+#                          logpdf=true,
+#                          blob_reduce! = default_blob_reduce!,
+#                          use_progress_meter=true)
+
+# This function allows to re-run the pdf for some, given thetas (`thetas_in`).  This is probably
+# a bit niche, but hey.
+
+# This I use when only sampling the prior but then want to get some function-blob evaluations.
+# That way the evaluation of an expensive forward function can be avoided.
+# """
+# function retrace_samples(pdf, thetas_in;
+#                          logpdf=true,
+#                          blob_reduce! = default_blob_reduce!,
+#                          use_progress_meter=true,
+#                          )
+#     # initialize
+#     nchains = 0
+#     niter = size(thetas_in,2)
+#     nburnin = 0
+#     nthin = 1
+#     pdf_, p0, theta0, blob0, thetas, blobs, nchains, pdftype, logposts =
+#         _initialize(pdf, thetas_in[:,1], niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=false)
+
+#     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Retracing samples, niter=$niter: ", 25) : nothing
+
+#     # run
+#     _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf_, niter,
+#                       nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+# end
+# function _retrace_samples!(p0, thetas_in, blob0, thetas, blobs, pdf, niter,
+#                            nburnin, nthin, pdftype, blob_reduce!, prog, logposts)
+#     @inbounds for ni=1:size(thetas_in,2)
+#         theta = thetas_in[:,ni]
+#         # take a step:
+#         p, blob = pdf(theta)
+
+#         _setindex!(thetas, theta, ni)
+#         blob_reduce!(blobs, blob, ni)
+#         logposts[ni] = p
+
+#         prog!=nothing && ProgressMeter.next!(prog)
+#     end
+#     accept_ratio = -1
+#     return thetas, accept_ratio, blobs, logposts
+# end

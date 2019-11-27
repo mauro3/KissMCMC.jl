@@ -17,9 +17,7 @@ proposal distributions (`ppdf`).
 
 Input:
 
-- pdf -- The probability density function to sample, defaults to
-         log-pdf.  (The likelihood*prior in a Bayesian setting) Returns
-         the density.
+- pdf -- The log probability density function to sample.
 
          It can also return an arbitrary blob of
          something.
@@ -36,28 +34,21 @@ Optional keyword input:
 - niter -- number of steps to take (10^5)
 - nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
-- logpdf -- either true (default) (for log-likelihoods) or false
+- blob_reduce! -- TODO
 
 Output:
 
-- samples:
-  - if typeof(theta0)==Vector then Array(eltype(theta0), length(theta0), niter-nburnin)
-  - if typeof(theta0)!=Vector then Array(typeof(theta0), niter-nburnin)
+- samples [Vector(typeof(theta0), niter-nburnin)]
 - accept_ratio: ratio accepted to total steps
-- blobs: anything else that the pdf-function returns as second argument
-- logposterior: the value of the log-posterior for each sample
+- blobs [Vector(typeof(theta0), niter-nburnin)]: anything else that the pdf-function returns as second argument
+- vpdf: the value of the log-density for each sample
 """
 function metropolisp(pdf, sample_ppdf, theta0;
                      niter=10^5,
                      nburnin=niter÷2,
-                     nchains=nothing,
                      nthin=1,
-                     logpdf=true,
-                     blob_reduce! = default_blob_reduce!,
+                     blob_reduce! = nothing
                      )
-    if nchains!=nothing
-        warn("nchains keyword not supported")
-    end
     # intialize
     pdf_, p0s, theta0s, blob0s, thetas, blobs, nchains, pdftype, logposts =
         _initialize(pdf, theta0, niter, nburnin, logpdf, nchains, nthin, blob_reduce!, make_SharedArray=true)
