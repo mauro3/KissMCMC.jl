@@ -453,7 +453,7 @@ function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains,
     for n in (1-nburnin_chain):(niter_chain-nburnin_chain)
         for batch = 1:2
             ncs, ncos = circshift(SVector(1:nchains÷2, nchains÷2+1:nchains), batch-1)
-            for nc in ncs
+            Threads.@threads for nc in ncs
                 # draw a random other chain
                 no = rand(ncos)
                 # sample g (eq. 10)
@@ -473,12 +473,11 @@ function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains,
                     naccept[nc] += 1
                 end
 
-                    if n>0 && rem(n,nthin)==0 # store theta after burn-in
-                        push!(thetas[nc], theta0s[nc])
-                        hasblob && push!(blobs[nc], blob0s[nc])
-                        push!(logdensities[nc], p0s[nc])
-                    end
-
+                if n>0 && rem(n,nthin)==0 # store theta after burn-in
+                    push!(thetas[nc], theta0s[nc])
+                    hasblob && push!(blobs[nc], blob0s[nc])
+                    push!(logdensities[nc], p0s[nc])
+                end
             end # for nc =1:ncs
         end # batch = 1:2
         if rem(n,nthin)==0
