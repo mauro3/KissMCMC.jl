@@ -26,7 +26,7 @@ Input:
 
 - sample_ppdf -- draws a sample for the proposal/jump distribution
                  `sample_ppdf(theta)`.  Needs to be symmetric:
-                 `sample_ppdf(theta1)==sample_ppdf(theta2)`
+                 `ppdf(theta1)==ppdf(theta2)`
 - theta0 -- initial value of parameters (<:AbstractVector)
 
 Optional keyword input:
@@ -68,7 +68,7 @@ end
 
 "Makes output arrays"
 function init_output_metro(v0s, niter)
-    vs = typeof(theta0)[];
+    vs = typeof(v0s)[];
     sizehint!.(vs, niter)
     return vs
 end
@@ -295,7 +295,7 @@ function make_theta0s(theta0::T, ball_radius::T, pdf, nwalkers;
                       ntries=100,
                       hasblob=false) where T
     npara = length(theta0)
-    if ball_radius isa Number
+    if ball_radius isa Number && !(T<:Number)
         ball_radius = ones(npara) * ball_radius
     end
     @assert length(ball_radius)==npara
@@ -305,9 +305,13 @@ function make_theta0s(theta0::T, ball_radius::T, pdf, nwalkers;
     for i=1:nwalkers
         for k=1:ball_radius_halfing_steps
             j = 0
-            ball_radius ./= 2^(k-1)
+            ball_radius *= 1/2^(k-1)
             for j=1:ntries
-                tmp = theta0 .+ randn(npara).*ball_radius
+                tmp = if npara==1
+                    theta0 .+ randn().*ball_radius
+                else
+                    theta0 .+ randn(npara).*ball_radius
+                end
                 if hasblob
                     p0, blob0 = pdf(tmp)
                 else
@@ -346,7 +350,7 @@ Returns:
 - blobs
 - log-densities
 """
-function squash_walkers(thetas, accept_ratio, logdensities, blobs;
+function squash_walkers(thetas, accept_ratio, logdensities=nothing, blobs=nothing;
                        drop_low_accept_ratio=false,
                        drop_fact=2,
                        verbose=true,
@@ -374,11 +378,15 @@ function squash_walkers(thetas, accept_ratio, logdensities, blobs;
     t = copy(thetas[walkers2keep[1]])
     append!.(Ref(t), thetas[walkers2keep[2:end]])
 
-    l = copy(logdensities[walkers2keep[1]])
-    append!.(Ref(l), logdensities[walkers2keep[2:end]])
+    if logdensities==nothing
+        l = nothing
+    else
+        copy(logdensities[walkers2keep[1]])
+        append!.(Ref(l), logdensities[walkers2keep[2:end]])
+    end
 
-    b = if blobs==nothing
-        nothing
+    if blobs==nothing
+        b = nothing
     else
         b = copy(blobs[walkers2keep])
         append!.(Ref(b), blobs[walkers2keep[2:end]])
@@ -388,10 +396,12 @@ function squash_walkers(thetas, accept_ratio, logdensities, blobs;
         nc = length(walkers2keep)
         ns = length(thetas[1])
         perm = sortperm(vcat([collect(1:ns) for i=1:nc]...))
-        if blobs!=nothing
+        if b!=nothing
             b = b[perm]
         end
-        l = l[perm]
+        if l!=nothing
+            l = l[perm]
+        end
         t = t[perm]
     end
     return t, mean(accept_ratio[walkers2keep]), l, b
