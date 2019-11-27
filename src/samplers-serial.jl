@@ -122,8 +122,7 @@ end
           nburnin=niter÷2,
           nthin=1,
           a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-          use_progress_meter=true,
-          ball_radius_halfing_steps=7)
+          use_progress_meter=true)
 
 Input:
 
@@ -188,72 +187,16 @@ function emcee(pdf, theta0s;
     # initialize progress meter
     prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
     # do the MCMC
-    #@inferred _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
     _emcee(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
 end
 
-function _emcee(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
-    # initialize output
-    thetas = [eltype(theta0s)[] for i=1:nchains]
-    sizehint!.(thetas, niter_chain)
-    blobs =  [eltype(blob0s)[] for i=1:nchains]
-    hasblob && sizehint!.(blobs, niter_chain)
-    logdensities =  [eltype(p0s)[] for i=1:nchains]
-    sizehint!.(logdensities, niter_chain)
-
-    # initialization and work arrays:
-    naccept = zeros(Int, nchains)
-    N = length(theta0s[1])
-    nn = 1
-    for n in (1-nburnin_chain):(niter_chain-nburnin_chain)
-        for nc = 1:nchains
-            # draw a random other chain
-            no = rand(1:nchains-1)
-            no = no>=nc ? no+1 : no # shift by one
-            # sample g (eq. 10)
-            z = sample_g(a_scale)
-
-            # sample a new theta with the stretch move (eq. 7):
-            theta1 = theta0s[no] .+ z .* (theta0s[nc] .- theta0s[no])
-            # and calculate the theta1 density:
-            p1, blob1 = pdf(theta1)
-
-            # if z^(N-1)*p1/p0>rand() then accept the new theta:
-            if (N-1)*log(z) + p1 - p0s[nc] >= log(rand())
-                theta0s[nc] = theta1
-                p0s[nc] = p1
-                blob0s[nc] = blob1
-                naccept[nc] += 1
-            end
-
-            if n>0 && rem(n,nthin)==0 # store theta after burn-in
-                push!(thetas[nc], theta0s[nc])
-                hasblob && push!(blobs[nc], blob0s[nc])
-                push!(logdensities[nc], p0s[nc])
-            end
-        end # for NC =1:nchains
-
-        # update progress meter only every so often
-        if rem(n,nthin)==0
-            macc = mean(naccept)
-            sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
-            outl = sum(abs.(naccept.-macc).>2*sacc)
-            prog!=nothing && ProgressMeter.next!(prog;
-                                                 showvalues = [(:accept_ratio_mean, round(macc/nn,sigdigits=3)),
-                                                               (:accept_ratio_std, round(sacc/nn,sigdigits=3)),
-                                                           (:accept_ratio_outliers, outl),
-                                                               (:burnin_phase, n<=0)])
-        end
-        if n==0 # reset after burnin
-            naccept = fill!(naccept,0)
-            nn = 1
-        end
-        nn +=1
-    end # for n=(1-nburnin_chain):(niter_chain-nburnin_chain)
-
-    accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
-    return thetas, accept_ratio, logdensities, blobs
+"Makes output arrays"
+function init_storage(v0s, nchains, niter_chain)
+    vs = [eltype(v0s)[] for i=1:nchains]
+    sizehint!.(vs, niter_chain)
+    return vs
 end
+init_storage(v0s::Array{Nothing,1}, nchains, niter_chain) = nothing
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
 g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
@@ -264,43 +207,7 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
-"""
-
-Same as emcee but multi-threaded.  Only worth it if the logdensity function is expensive enough.
-"""
-function emceep(pdf, theta0s;
-               niter=10^5,
-               nburnin=niter÷2,
-               nthin=1,
-               a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-               use_progress_meter=true
-               )
-    @assert a_scale>1
-    nchains = length(theta0s)
-    @assert iseven(nchains) "Use an even number of chains."
-    niter_chain = niter ÷ nchains
-    nburnin_chain = nburnin ÷ nchains
-    @assert nchains>=length(theta0s[1])+2 "Use more chains: at least DOF+2, but better many more."
-
-    # initialize
-    pdf_ = hasblob(pdf, theta0s[1]) ? pdf : t -> (pdf(t), nothing)
-    tmp = pdf_.(theta0s)
-    p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
-
-    # initialize progress meter
-    prog = use_progress_meter ? Progress(length((1-nburnin_chain):(niter_chain-nburnin_chain)), 1, "emcee, niter=$niter, nchains=$nchains: ", 25) : nothing
-    # do the MCMC
-    _emceep(pdf_, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob(pdf, theta0s[1]))
-end
-
-function init_storage(v0s, nchains, niter_chain)
-    vs = [eltype(v0s)[] for i=1:nchains]
-    sizehint!.(vs, niter_chain)
-    return vs
-end
-init_storage(v0s::Array{Nothing,1}, nchains, niter_chain) = nothing
-
-function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
+function _emcee(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains, nthin, a_scale, prog, hasblob)
     # initialize output
     thetas = init_storage(theta0s, nchains, niter_chain)
     blobs = init_storage(blob0s, nchains, niter_chain)
@@ -360,7 +267,6 @@ function _emceep(pdf, theta0s, p0s, blob0s, niter_chain, nburnin_chain, nchains,
     accept_ratio = [na/(niter_chain-nburnin_chain) for na in naccept]
     return thetas, accept_ratio, logdensities, blobs
 end
-
 
 
 # """
@@ -585,6 +491,7 @@ end
 #     end
 #     return length(taus)-1
 # end
+
 
 """
     squash_chains(thetas, accept_ratio, blobs, logdensities;
