@@ -26,7 +26,8 @@ Input:
 
 - sample_ppdf -- draws a sample for the proposal/jump distribution
                  `sample_ppdf(theta)`.  Needs to be symmetric:
-                 `ppdf(theta1)==ppdf(theta2)`
+                 `ppdf(theta1)==ppdf(theta2)`.  Example:
+                 `theta -> c*randn() + theta`
 - theta0 -- initial value of parameters (<:AbstractVector)
 
 Optional keyword input:
@@ -120,12 +121,12 @@ end
 
 """
     emcee(pdf, theta0s;
-          nwalkers=10^2,
           niter=10^5,
           nburnin=niter÷2,
           nthin=1,
           a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
-          use_progress_meter=true)
+          use_progress_meter=true,
+          hasblob=false)
 
 The affine invariant MCMC sampler, aka MC hammer in its Python emcee implementation
 
@@ -290,7 +291,7 @@ Example
     nwalkers = 100
     samples = emcee(pdf, make_theta0s([0.0, 0.0], [0.1, 0.1], pdf, nwalkers), nburnin=0, use_progress_meter=false);
 """
-function make_theta0s(theta0::T, ball_radius::T, pdf, nwalkers;
+function make_theta0s(theta0::T, ball_radius, pdf, nwalkers;
                       ball_radius_halfing_steps=7,
                       ntries=100,
                       hasblob=false) where T
@@ -347,8 +348,8 @@ by setting drop_low_accept_ratio=true.  drop_fact -> increase to drop more walke
 Returns:
 - thetas
 - mean(accept_ratio[walkers2keep])
-- blobs
 - log-densities
+- blobs
 """
 function squash_walkers(thetas, accept_ratio, logdensities=nothing, blobs=nothing;
                        drop_low_accept_ratio=false,
@@ -381,7 +382,7 @@ function squash_walkers(thetas, accept_ratio, logdensities=nothing, blobs=nothin
     if logdensities==nothing
         l = nothing
     else
-        copy(logdensities[walkers2keep[1]])
+        l = copy(logdensities[walkers2keep[1]])
         append!.(Ref(l), logdensities[walkers2keep[2:end]])
     end
 
