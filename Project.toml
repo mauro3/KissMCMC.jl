@@ -1,5 +1,7 @@
 name = "KissMCMC"
 uuid = "79d62d8d-4dfd-5781-bc85-ce78e0ac132a"
+author = ["Mauro Werder <mauro3@runbox.com>"]
+version = "0.2.0"
 
 [deps]
 ProgressMeter = "92933f4c-e287-5a05-a399-4b506db050ca"
