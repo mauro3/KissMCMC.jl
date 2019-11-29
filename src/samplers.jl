@@ -192,7 +192,7 @@ function emcee(pdf, theta0s;
     p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
 
     # initialize progress meter
-    prog = use_progress_meter ? Progress(length((1-nburnin_walker):(niter_walker-nburnin_walker)), 1, "emcee, niter=$niter, nwalkers=$nwalkers: ", 25) : nothing
+    prog = use_progress_meter ? Progress(length((1-nburnin_walker):(niter_walker-nburnin_walker))÷nthin, 1, "emcee, niter=$niter, nwalkers=$nwalkers: ", 25) : nothing
     # do the MCMC
     _emcee(pdf_, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob)
 end
@@ -254,7 +254,7 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalker
                 end
             end # for nc =1:ncs
         end # batch = 1:2
-        if rem(n,nthin)==0
+        if rem(n,nthin)==0 # store theta after burn-in
             macc = mean(naccept)
             sacc = sqrt(var(naccept)) # std(naccept) is not type-stable!
             outl = sum(abs.(naccept.-macc).>2*sacc)
@@ -270,7 +270,6 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalker
         end
         nn +=1
     end # for n=(1-nburnin_walker):(niter_walker-nburnin_walker)
-
     accept_ratio = [na/(niter_walker-nburnin_walker) for na in naccept]
     return thetas, accept_ratio, logdensities, blobs
 end

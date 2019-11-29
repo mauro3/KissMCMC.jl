@@ -17,6 +17,7 @@ end
 @testset "emcee" begin
     for tc in testcases
         pdf = make_lpdf(tc.dist)
+        @inferred pdf(tc.theta0)
         theta0s = make_theta0s(tc.theta0, tc.ball_radius,
                                pdf, tc.nwalkers,
                                hasblob=tc.hasblob)
@@ -26,7 +27,9 @@ end
                         use_progress_meter=false);
         thetas, accept_ratio, logdensities, blobs = squash_walkers(samples...;
                                                                    verbose=false)
+        !tc.hasblob && @test blobs==nothing
         @test length(thetas)==tc.niter÷2
+        @test length(logdensities)==tc.niter÷2
         @test accept_ratio>0.1
         test_mean_std(thetas, tc, tc.tole)
         #test_blobs(tc[:truths], blobs)
