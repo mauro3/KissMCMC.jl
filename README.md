@@ -1,6 +1,6 @@
 # KissMCMC
 
-[![Build Status](https://travis-ci.com/mauro3/KissMCMC.jl.svg?branch=master)](https://travis-ci.com/mauro3/KissMCMC.jl)
+[![Build Status](https://travis-ci.org/mauro3/KissMCMC.jl.svg?branch=master)](https://travis-ci.com/mauro3/KissMCMC.jl)
 [![Build Status](https://ci.appveyor.com/api/projects/status/github/mauro3/KissMCMC.jl?svg=true)](https://ci.appveyor.com/project/mauro3/KissMCMC-jl)
 [![Codecov](https://codecov.io/gh/mauro3/KissMCMC.jl/branch/master/graph/badge.svg)](https://codecov.io/gh/mauro3/KissMCMC.jl)
 [![Build Status](https://api.cirrus-ci.com/github/mauro3/KissMCMC.jl.svg)](https://cirrus-ci.com/github/mauro3/KissMCMC.jl)
