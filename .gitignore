@@ -3,3 +3,4 @@
 *.jl.mem
 notes*
 tmp*
+Manifest.toml
