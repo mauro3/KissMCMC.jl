@@ -27,6 +27,9 @@ Base.@kwdef struct ATest
     sample_ppdf = theta -> randn() + theta
     tole = 0.3
     tolm = 0.3
+    otherkws = Dict{Symbol,Any}()
+    blob_truths = nothing
+    squash_walkers_kws = Dict{Symbol,Any}()
 end
 
 # helpers
@@ -38,17 +41,13 @@ function test_mean_std(thetas, atest::ATest, tol)
     median_!=nothing && @test abs.(median(thetas) - median_) < abs.(std_ * tol)
     skewness_!=nothing && @test abs.(SB.skewness(thetas) - skewness_) < abs.(std_ * 2*tol)
 end
-function test_blobs(truths::Dict, blobs)
-    nothing
-    # TODO
+function test_blobs(blob_truths, blobs)
+    blob_truths==nothing && return nothing
+    @test blob_truths==blobs
 end
 function test_logdensities(samples, logdensities, pdf)
     nothing
 end
-
-# TODO
-#             # Rosenbrock
-#             rosenpdf =  x-> -( 100*(x[2]-x[1]^2)^2+(1-x[1])^2 )/20
 
 testcases = [
     ATest(dist = D.Normal(-5.0, 3.0),
@@ -76,7 +75,36 @@ testcases = [
           niter = 10^7,
           sample_ppdf = theta -> 0.5*randn(2) .+ theta,
           tolm = 0.6,
-          tole = 0.6),]
+          tole = 0.6),
+    # tests with blobs
+    ATest(dist = x -> (-(x+5)^2/(2*3.0^2), ones(1000)), # a blob, default reductions
+          dim = 1,
+          median_ = -5.0,
+          mean_ = -5.0,
+          std_ = 3.0,
+          skewness_ = nothing,
+          theta0=-4.0,
+          hasblob=true,
+          sample_ppdf = (theta -> 9*randn() + theta),
+          nwalkers = 100,
+          niter = 10^4,
+          blob_truths = [ones(1000) for i=1:10^4÷2]
+          ),
+    ATest(dist = x -> (-(x+5)^2/(2*3.0^2), ones(1000)), # a blob
+          dim = 1,
+          median_ = -5.0,
+          mean_ = -5.0,
+          std_ = 3.0,
+          skewness_ = nothing,
+          theta0=-4.0,
+          hasblob=true,
+          sample_ppdf = (theta -> 9*randn() + theta),
+          otherkws=Dict(:init_blobs => (blob0, nsamples) -> [0],
+                        :reduce_blob! => (blobs, blob) -> blobs[1] += blob[1]), # use the sum as blob-reduction
+          squash_walkers_kws = Dict(:merge_blobs! => (blobs1, blobs2) -> blobs1[1] += blobs2[1]),
+          blob_truths = [10^4÷2]
+          )
+]
 
 make_lpdf(dist::D.Distribution) = x -> D.logpdf(dist, x)
 make_lpdf(dist) = dist

@@ -24,15 +24,25 @@ end
         samples = emcee(pdf, theta0s;
                         niter=tc.niter,
                         hasblob=tc.hasblob,
-                        use_progress_meter=false);
+                        use_progress_meter=false,
+                        tc.otherkws...);
+        @test length.(samples[1:3]) == (tc.nwalkers, tc.nwalkers, tc.nwalkers)
+        if tc.hasblob
+            @test length(samples[4]) == tc.nwalkers
+        else
+            @test samples[4]==nothing
+        end
+        @test length(samples[1][1]) == tc.niter÷tc.nwalkers÷2 # ÷2 because of burnin
         thetas, accept_ratio, logdensities, blobs = squash_walkers(samples...;
-                                                                   verbose=false)
+                                                                   verbose=false,
+                                                                   tc.squash_walkers_kws...)
+
         !tc.hasblob && @test blobs==nothing
-        @test length(thetas)==tc.niter÷2
-        @test length(logdensities)==tc.niter÷2
+        @test length(thetas) == tc.niter÷2
+        @test length(logdensities) == tc.niter÷2
         @test accept_ratio>0.1
         test_mean_std(thetas, tc, tc.tole)
-        #test_blobs(tc[:truths], blobs)
-        #test_logdensities(tc[:truths], logdensities, pdf)
+        test_blobs(tc.blob_truths, blobs)
+        #test_logdensities(tc.truths, logdensities, pdf)
     end
 end
