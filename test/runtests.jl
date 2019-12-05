@@ -25,8 +25,8 @@ Base.@kwdef struct ATest
     niter = 10^4
     hasblob = false
     sample_ppdf = theta -> randn() + theta
-    tole = 0.2
-    tolm = 0.2
+    tole = 0.3
+    tolm = 0.3
 end
 
 # helpers
@@ -59,7 +59,7 @@ testcases = [
           theta0 = 0.4,
           sample_ppdf = theta -> 7.5*randn() + theta,
           niter = 10^7,
-          tolm = 0.3),
+          tolm = 0.4),
     ATest(dist = D.MvNormal([0.5,-0.25], [0.47 1.8
                                           1.8 7.]), # 2D normal dist
           theta0 = [0.4, 0.3],
@@ -75,8 +75,8 @@ testcases = [
           theta0 = [0.0, 0.0],
           niter = 10^7,
           sample_ppdf = theta -> 0.5*randn(2) .+ theta,
-          tolm = 0.5,
-          tole = 0.5),]
+          tolm = 0.6,
+          tole = 0.6),]
 
 make_lpdf(dist::D.Distribution) = x -> D.logpdf(dist, x)
 make_lpdf(dist) = dist
