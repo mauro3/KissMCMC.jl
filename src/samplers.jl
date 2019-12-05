@@ -11,7 +11,11 @@
                niter=10^5,
                nburnin=niter÷2,
                nthin=1,
-               use_progress_meter=true)
+               use_progress_meter=true,
+               hasblob=false, # whether the pdf also returns a blob
+               init_blobs=init_output_vector, # initialize storage for blobs, of form (blob0, nsamples) -> container
+               reduce_blob!=(blobs, blob) -> push!(blobs, blob) # add or reduce one blob into blob-storage
+
 
 Metropolis sampler, the simplest MCMC method. Can only be used with symmetric
 proposal distributions (`ppdf`).
@@ -36,6 +40,9 @@ Optional keyword input:
 - nburnin -- number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - use_progress_meter=true : whether to show a progress meter
+- hasblob=false -- whether the pdf also returns a blob
+- init_blobs=init_output_vector -- initialize storage for blobs, of form (blob0, nsamples) -> container
+- reduce_blob!=(blobs, blob) -> push!(blobs, blob) -- add or reduce one blob into blob-storage
 
 Notes:
 - single threaded
@@ -54,7 +61,9 @@ function metropolis(pdf, sample_ppdf, theta0;
                     nburnin=niter÷2,
                     nthin=1,
                     use_progress_meter=true,
-                    hasblob=false
+                    hasblob=false, # whether the pdf also returns a blob
+                    init_blobs=init_output_vector, # initialize storage for blobs, of form (blob0, nsamples) -> container
+                    reduce_blob! =(blobs, blob) -> push!(blobs, blob) # add one blob to blob-storage
                     )
     # initialize
     theta0 = deepcopy(theta0)
@@ -63,25 +72,26 @@ function metropolis(pdf, sample_ppdf, theta0;
     prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
 
     # run
-    #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
-    _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
+    #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob, init_blobs, reduce_blob!)
+    _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob, init_blobs, reduce_blob!)
 end
 
 "Makes output arrays"
-function init_output_metro(v0s, niter)
+function init_output_vector(v0s, nsamples)
     vs = typeof(v0s)[];
-    sizehint!.(vs, niter)
+    sizehint!.(vs, nsamples)
     return vs
 end
-init_output_metro(v0s::Nothing, niter) = nothing
+init_output_vector(v0s::Nothing, nsamples) = nothing
 
-function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob)
+function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob, init_blobs, reduce_blob!)
+    # number of stored samples
     nsamples = (niter-nburnin) ÷ nthin
 
     # initialize output arrays
-    thetas = init_output_metro(theta0, niter)
-    blobs = init_output_metro(blob0, niter)
-    logdensities = init_output_metro(p0, niter)
+    thetas = init_output_vector(theta0, nsamples)
+    blobs = init_blobs(blob0, nsamples)
+    logdensities = init_output_vector(p0, nsamples)
 
     naccept = 0
     nn = 1
@@ -103,7 +113,7 @@ function _metropolis(pdf, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin,
                                                   (:burnin_phase, n<=0)])
             if n>0 # after burnin
                 push!(thetas, theta0)
-                hasblob && push!(blobs, blob0)
+                hasblob && reduce_blob!(blobs, blob0)
                 push!(logdensities, p0)
             end
         end
@@ -126,7 +136,10 @@ end
           nthin=1,
           a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
           use_progress_meter=true,
-          hasblob=false)
+          hasblob=false,
+          init_blobs=init_output_vector, # initialize storage for blobs, of form (blob0, nsamples_walker) -> container
+          reduce_blob!=(blobs, blob) -> push!(blobs, blob) # add one blob to blob-storage
+
 
 The affine invariant MCMC sampler, aka MC hammer in its Python emcee implementation
 
@@ -147,6 +160,9 @@ Optional key-word input:
 - nburnin -- total number of initial steps discarded, aka burn-in (niter/3)
 - nthin -- only store every n-th sample (default=1)
 - use_progress_meter=true : whether to show a progress meter
+- hasblob=false -- whether the pdf also returns a blob
+- init_blobs=init_output_vector -- initialize storage for blobs of one walker, of form `(blob0, nsamples) -> container`
+- reduce_blob!=(blobs, blob) -> push!(blobs, blob) -- add or reduce one blob into blob-storage (of one walker)
 
 Output:
 - samples: of type & size `Matrix{typeof(theta0)}(niter-nburnin, nwalkers)`
@@ -175,7 +191,9 @@ function emcee(pdf, theta0s;
                nthin=1,
                a_scale=2.0, # step scale parameter.  Probably needn't be adjusted
                use_progress_meter=true,
-               hasblob=false
+               hasblob=false,
+               init_blobs=init_output_vector, # initialize storage for blobs, of form (blob0, nsamples_walker) -> container
+               reduce_blob! =(blobs, blob) -> push!(blobs, blob) # add one blob to blob-storage
                )
     theta0s = deepcopy(theta0s)
 
@@ -194,16 +212,13 @@ function emcee(pdf, theta0s;
     # initialize progress meter
     prog = use_progress_meter ? Progress(length((1-nburnin_walker):(niter_walker-nburnin_walker))÷nthin, 1, "emcee, niter=$niter, nwalkers=$nwalkers: ", 25) : nothing
     # do the MCMC
-    _emcee(pdf_, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob)
+    _emcee(pdf_, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob, init_blobs, reduce_blob!)
 end
 
 "Makes output arrays"
-function init_output_emcee(v0s, nwalkers, niter_walker)
-    vs = [eltype(v0s)[] for i=1:nwalkers]
-    sizehint!.(vs, niter_walker)
-    return vs
-end
-init_output_emcee(v0s::Array{Nothing,1}, nwalkers, niter_walker) = nothing
+init_output_emcee(v0s, nwalkers, nsamples_walker, init_fn=init_output_vector) =
+    [init_fn(v0s[i], nsamples_walker) for i=1:nwalkers]
+init_output_emcee(v0s::Vector{Nothing}, nwalkers, nsamples_walker, init_fn=init_output_vector) = nothing
 
 "g-pdf, see eq. 10 of Foreman-Mackey et al. 2013."
 g_pdf(z, a) = 1/a<=z<=a ? 1/sqrt(z) * 1/(2*(sqrt(a)-sqrt(1/a))) : zero(z)
@@ -214,11 +229,14 @@ cdf_g_inv(u, a) = (u*(sqrt(a)-sqrt(1/a)) + sqrt(1/a) )^2
 "Sample from g using inverse transform sampling.  a=2.0 is recommended."
 sample_g(a) = cdf_g_inv(rand(), a)
 
-function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob)
+function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob, init_blobs, reduce_blob!)
+    # number of stored samples of each walker
+    nsamples_walker = (niter_walker-nburnin_walker) ÷ nthin
+
     # initialize output
-    thetas = init_output_emcee(theta0s, nwalkers, niter_walker)
-    blobs = init_output_emcee(blob0s, nwalkers, niter_walker)
-    logdensities = init_output_emcee(p0s, nwalkers, niter_walker)
+    thetas = init_output_emcee(theta0s, nwalkers, nsamples_walker)
+    blobs = init_output_emcee(blob0s, nwalkers, nsamples_walker, init_blobs)
+    logdensities = init_output_emcee(p0s, nwalkers, nsamples_walker)
 
     # initialization and work arrays:
     naccept = zeros(Int, nwalkers)
@@ -249,7 +267,7 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalker
 
                 if n>0 && rem(n,nthin)==0 # store theta after burn-in
                     push!(thetas[nc], theta0s[nc])
-                    hasblob && push!(blobs[nc], blob0s[nc])
+                    hasblob && reduce_blob!(blobs[nc], blob0s[nc])
                     push!(logdensities[nc], p0s[nc])
                 end
             end # for nc =1:ncs
@@ -336,7 +354,8 @@ end
                                                          drop_low_accept_ratio=false,
                                                          drop_fact=2,
                                                          verbose=true,
-                                                         order=false) # if true the samples are ordered
+                                                         order=false, # if true the samples are ordered, this may not work with blobs not stored in vectors
+                                                         merge_blobs!=append!) # function to merge one blobs into another blobs (blobs1, blobs1) -> merge blobs2 into blobs1
 
 Puts the samples of all emcee walkers into one vector.
 
@@ -351,10 +370,11 @@ Returns:
 - blobs
 """
 function squash_walkers(thetas, accept_ratio, logdensities=nothing, blobs=nothing;
-                       drop_low_accept_ratio=false,
-                       drop_fact=2,
-                       verbose=true,
-                       order=false)
+                        drop_low_accept_ratio=false,
+                        drop_fact=2,
+                        verbose=true,
+                        order=false, # if true the samples are ordered, this may not work with blobs not stored in vectors
+                        merge_blobs! =append!) # function to merge one blobs into another blobs (blobs1,blobs2) ->
 
     nwalkers=length(accept_ratio)
     if drop_low_accept_ratio
@@ -388,8 +408,8 @@ function squash_walkers(thetas, accept_ratio, logdensities=nothing, blobs=nothin
     if blobs==nothing
         b = nothing
     else
-        b = copy(blobs[walkers2keep])
-        append!.(Ref(b), blobs[walkers2keep[2:end]])
+        b = deepcopy(blobs[walkers2keep[1]])
+        merge_blobs!.(Ref(b), blobs[walkers2keep[2:end]])
     end
 
     if order # order such that early samples are early in thetas
