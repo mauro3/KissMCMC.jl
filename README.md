@@ -49,4 +49,4 @@ Other, probably better Julia MCMC packages:
 - https://github.com/brian-j-smith/Mamba.jl
 - and many others
 
-The (original) emcee python package: http://dan.iel.fm/emcee/current/
+The (original) emcee python package: https://github.com/dfm/emcee
