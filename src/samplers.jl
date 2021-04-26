@@ -283,7 +283,7 @@ function _emcee(pdf, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalker
                                                                (:burnin_phase, n<=0)])
         end
         if n==0 # reset after burnin
-            naccept = fill!(naccept,0)
+            fill!(naccept,0)
             nn = 1
         end
         nn +=1
