@@ -1,4 +1,4 @@
-Copyright (c) 2016-2019: ETH Zurich, Mauro Werder and contributors, VAW Glaciology
+Copyright (c) 2016-2022: ETH Zurich, Mauro Werder and contributors, VAW Glaciology
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
