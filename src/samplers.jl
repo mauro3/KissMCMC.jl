@@ -69,7 +69,7 @@ function metropolis(pdf, sample_ppdf, theta0;
     theta0 = deepcopy(theta0)
     pdf_ = hasblob ? pdf : t -> (pdf(t), nothing)
     p0, blob0 = pdf_(theta0)
-    prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin, 1, "Metropolis, niter=$niter: ", 25) : nothing
+    prog = use_progress_meter ? Progress(length((1-nburnin):(niter-nburnin))÷nthin; dt=1, desc="Metropolis, niter=$niter: ", barlen=25) : nothing
 
     # run
     #@inferred _metropolis(pdf_, sample_ppdf, theta0, p0, blob0, niter, nburnin, nthin, prog, hasblob, init_blobs, reduce_blob!)
@@ -210,7 +210,8 @@ function emcee(pdf, theta0s;
     p0s, blob0s = getindex.(tmp, 1), getindex.(tmp, 2)
 
     # initialize progress meter
-    prog = use_progress_meter ? Progress(length((1-nburnin_walker):(niter_walker-nburnin_walker))÷nthin, 1, "emcee, niter=$niter, nwalkers=$nwalkers: ", 25) : nothing
+    prog = use_progress_meter ? Progress(length((1-nburnin_walker):(niter_walker-nburnin_walker))÷nthin; dt=1, desc="emcee, niter=$niter, nwalkers=$nwalkers: ", barlen=25) : nothing
+
     # do the MCMC
     _emcee(pdf_, theta0s, p0s, blob0s, niter_walker, nburnin_walker, nwalkers, nthin, a_scale, prog, hasblob, init_blobs, reduce_blob!)
 end
